@@ -135,10 +135,17 @@ class ScriptedBrain:
 #: and two hosts serving different quantisations of the same weights are two different
 #: systems. A benchmark that silently load-balances between them is measuring the router.
 DEFAULT_PROVIDER_ORDER: dict[str, list[str]] = {
+    # Single-provider models. OpenRouter forwards straight through, so there is no
+    # routing decision to make and nothing to pin against -- the least ambiguous case.
+    "upstage/solar-pro4": ["upstage"],
+    # Multi-provider models. Pinning to the lab's own endpoint means we measure the
+    # weights the lab published rather than whichever host happened to win the routing.
     "deepseek/deepseek-v4-flash": ["deepseek"],
+    "google/gemini-3.7-flash": ["google-vertex", "google-ai-studio"],
+    "z-ai/glm-5.2": ["z-ai"],
+    "xiaomi/mimo-v2.5": ["xiaomi"],
     "openai/gpt-5.6-luna": ["openai"],
     "openai/gpt-5.6-terra": ["openai"],
-    "openai/gpt-5.6-sol": ["openai"],
 }
 
 

@@ -32,9 +32,11 @@ from paynaka.mandate import IntentMandate
 # published USD rates as of August 2026, and the script prints the arithmetic so a stale
 # number is obvious rather than buried.
 MODELS: dict[str, tuple[float, float]] = {
-    "deepseek/deepseek-v4-flash": (0.049, 0.098),
-    "openai/gpt-5.6-luna": (0.20, 1.20),
-    "openai/gpt-5.6-terra": (2.00, 12.00),
+    "upstage/solar-pro4": (0.03, 0.12),
+    "deepseek/deepseek-v4-flash": (0.04886, 0.09772),
+    "xiaomi/mimo-v2.5": (0.119, 0.238),
+    "z-ai/glm-5.2": (0.336, 1.056),
+    "google/gemini-3.7-flash": (0.375, 1.875),
 }
 
 #: Output tokens per model turn. Measured against the scripted agent's own tool calls plus
