@@ -95,6 +95,20 @@ class DefenceSummary:
         }
 
 
+def summarise_by_model(results: list[RunResult]) -> dict[str, dict[str, DefenceSummary]]:
+    """Group by model, then by defence.
+
+    This is the table the whole multi-provider design exists to produce. Susceptibility is
+    a property of a model, so the ``none`` and ``prompt`` rows should move across families.
+    PayNaka's guarantee is a property of deterministic code, so its row should not. A flat
+    line needs more than one point, which is why one model is not enough.
+    """
+    by_model: dict[str, list[RunResult]] = defaultdict(list)
+    for result in results:
+        by_model[result.model or "unknown"].append(result)
+    return {model: summarise(rows) for model, rows in sorted(by_model.items())}
+
+
 def summarise(results: list[RunResult]) -> dict[str, DefenceSummary]:
     summaries: dict[str, DefenceSummary] = {}
     for result in results:
@@ -201,6 +215,39 @@ def write_results(
                 outcomes = summary.by_family.get(family, [])
                 cells.append(f"{sum(outcomes) / len(outcomes):.0%}" if outcomes else "—")
             lines.append(f"| {family} | " + " | ".join(cells) + " |")
+
+    models = sorted({r.model for r in results if r.model} - {"scripted", ""})
+    if len(models) > 1:
+        lines += [
+            "",
+            "## Across model families",
+            "",
+            "Susceptibility is a property of a model. PayNaka's guarantee is a property of",
+            "deterministic code. So the first two rows should move across families and the",
+            "last should not — **that divergence is the result**, and it is the reason this",
+            "benchmark runs on more than one model.",
+            "",
+        ]
+        per_model = summarise_by_model(results)
+        header = "| Defence | " + " | ".join(models) + " |"
+        lines.append(header)
+        lines.append("| --- | " + " | ".join("---:" for _ in models) + " |")
+        for name in _ORDER:
+            if not any(name in per_model.get(m, {}) for m in models):
+                continue
+            cells = []
+            for model in models:
+                row = per_model.get(model, {}).get(name)
+                cells.append(f"{row.attack_success_rate:.1%}" if row else "—")
+            lines.append(f"| {_LABELS.get(name, name)} | " + " | ".join(cells) + " |")
+
+        served = sorted({r.served_by for r in results if r.served_by})
+        if served:
+            lines += [
+                "",
+                f"Served by: {', '.join(served)}. The host is pinned and recorded, because two",
+                "hosts serving different quantisations of one slug are two different systems.",
+            ]
 
     lines += [
         "",
