@@ -1,0 +1,50 @@
+# ---- secrets: this block must never be weakened ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/testdata/*.key
+secrets/
+.secrets/
+credentials.json
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+dist/
+build/
+
+# ---- node / console ----
+node_modules/
+console/dist/
+console/.vite/
+*.tsbuildinfo
+
+# ---- runtime state (regenerable; never commit a real ledger) ----
+*.db
+*.db-wal
+*.db-shm
+var/
+runs/
+.artifacts/
+
+# ---- benchmark output (RESULTS.md is committed; raw runs are not) ----
+haat/out/
+haat/.cache/
+
+# ---- editors / os ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
