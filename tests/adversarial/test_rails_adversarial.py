@@ -57,7 +57,7 @@ class TestNoLiveMode:
     def test_non_test_keys_are_refused(self, key: str, monkeypatch) -> None:
         monkeypatch.setenv("RAZORPAY_KEY_ID", key)
         monkeypatch.setenv("RAZORPAY_KEY_SECRET", "secret")
-        with pytest.raises(RailError, match="test key|not installed"):
+        with pytest.raises(RailError, match=r"test key|not installed"):
             RazorpayRail()
 
     def test_there_is_no_live_rail_to_build(self, monkeypatch) -> None:
@@ -88,7 +88,7 @@ class TestNoLiveMode:
     def test_missing_credentials_are_refused(self, monkeypatch) -> None:
         monkeypatch.delenv("RAZORPAY_KEY_ID", raising=False)
         monkeypatch.delenv("RAZORPAY_KEY_SECRET", raising=False)
-        with pytest.raises(RailError, match="must be set|not installed"):
+        with pytest.raises(RailError, match=r"must be set|not installed"):
             RazorpayRail()
 
 
