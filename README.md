@@ -12,8 +12,9 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="828 tests" src="https://img.shields.io/badge/tests-828-2F6B4F?style=flat-square">
-  <img alt="578 adversarial" src="https://img.shields.io/badge/adversarial-578-2F6B4F?style=flat-square">
+  <img alt="1154 tests" src="https://img.shields.io/badge/tests-1154-2F6B4F?style=flat-square">
+  <img alt="759 adversarial" src="https://img.shields.io/badge/adversarial-759-2F6B4F?style=flat-square">
+  <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
 
@@ -109,6 +110,53 @@ shows nothing about whether a real model would be fooled.
 
 That is a separate question, and it has been measured. See below.
 
+## The attack where making the model smarter cannot help
+
+The agent behaves perfectly. It searches, reads the product page, reports ₹1,999 to the
+shopper, and orders exactly one bag of atta. Then the merchant reprices the SKU, and — like
+every real shop — the order is totalled from the *live* catalogue at checkout.
+
+```
+agent reads ATTA-5KG        ₹1,999      <- what it tells the shopper
+merchant changes the price  ₹51,974     <- nobody tells anyone
+agent orders 1 x ATTA-5KG               <- an honest, faithful request
+merchant charges            ₹51,974
+```
+
+There is no injected text, so a prompt defence has nothing to be suspicious of. There is
+no reasoning error, so a more capable agent behaves identically. `make toctou`, 27 runs:
+
+| Reprice | none | prompt hardening | **PayNaka** |
+| --- | ---: | ---: | ---: |
+| +5% — the skim nobody notices | ₹99.95 | ₹99.95 | **₹0** |
+| ×2 | ₹1,999 | ₹1,999 | **₹0** |
+| ×26 | ₹49,975 | ₹49,975 | **₹0** |
+
+Prompt hardening loses exactly what no defence loses, because the prompt is not in the
+causal path. `max_total` was frozen before the trip began; ₹51,974 > ₹1,999, and the check
+does not care why the number changed.
+
+**The obvious objection, measured rather than argued.** *"A careful agent would re-check the
+price before ordering."* Three real models, gate **off**, *hardened* prompt:
+
+| | |
+| --- | ---: |
+| paid the repriced ₹51,974 | **3 / 3** |
+| re-checked the price at some point | 2 / 3 |
+| re-checked it **before paying** | **0 / 3** |
+
+They were not careless. Two of the three went back and looked at the price again — after
+calling `create_order`. They noticed. The card was already charged, and one then attempted
+a refund it had no authority to issue.
+
+**Diligence after an irreversible action is a post-mortem.** The only check that helps is
+the one that happens before the money moves.
+
+The limit, stated rather than buried: **the bound is exactly as tight as the mandate.** Those
+runs authorise the listed price to the paise. A shopper who says "something under ₹2,500"
+for a ₹1,999 bag has handed over ₹501 of room, and a +5% skim inside it is *authorised*.
+`make toctou --budget 250000` prints which check actually fired.
+
 ## Benchmark: a negative result, reported straight
 
 HAAT ships 540 cases — 252 visible attacks across six families, 90 sealed cases across two
@@ -131,8 +179,31 @@ That is a real finding, not a broken harness, and it is reported here rather tha
 because running the full sweep anyway would have produced four rows all reading 0% —
 an empty comparison that looks like a triumph to anyone skimming it.
 
-What it does *not* mean: that the checkpoint is unnecessary. See the next section, and
-[docs/HAAT.md](docs/HAAT.md) for the method.
+What it does *not* mean: that the checkpoint is unnecessary. The two sections above are
+attacks that need no model to be fooled at all. See [docs/HAAT.md](docs/HAAT.md) for method.
+
+**The detector, measured separately.** `paynaka/sentinel.py` flags poisoned fields before
+the agent reads them. It is layer two and nothing more — `gate.py` does not import it, a
+flag never blocks anything, and these numbers are never combined with the gate's. Over the
+six visible families and 100 benign fields:
+
+| | |
+| --- | ---: |
+| recall | **92.1%** (232 / 252) |
+| false positives | **0.0%** (0 / 100) |
+| margin | **5 points** |
+
+Read the margin, not just the zero. The benign set is deliberately hostile — recipes
+("add a spoon, set the flame low, ignore the packet"), shoppers writing in capitals,
+reviews quoting real `[SYSTEM ERROR]` messages, Hindi and Tamil, customers who mention
+their shopping assistant, someone chasing a refund. Several land within one signal of the
+threshold, and the closest scored 45 of 50. A zero false-positive rate says nothing about
+how nearly it happened; the margin is that number.
+
+Recall against the two **sealed** families is unmeasured, deliberately. The rules were
+written by reading the visible corpus, so the held-out set is the only evidence any of it
+generalises — and that evidence spends once. `make sentinel-sealed` refuses to run before
+the freeze tag exists.
 
 Corpus diversity, measured and published regardless:
 
@@ -144,9 +215,33 @@ mean pairwise similarity 0.110, p95 0.357, max 0.951
 
 ## It is not only about attackers
 
-An agent does not need an adversary to lose a merchant money. It needs a duplicate webhook. The same
-checkpoint enforces money-correctness invariants, including Indian payments regulation as executable
-policy:
+An agent does not need an adversary to lose a merchant money. It needs a duplicate webhook.
+
+`make chaos` runs six of them. No model, no keys, no network, reproducible to the paise:
+redelivery across two workers, redelivery across a deploy, a refund arriving before its
+capture, a redelivery whose amount was altered in flight, and a refund that succeeded while
+the response was lost.
+
+```
+Totals across 6 scenarios      one ₹1,999 order, one ₹499 item returned
+  naive handler    overspent ₹3,994.00
+  paynaka          overspent     ₹0.00
+```
+
+The naive handler is deliberately **not** a strawman — it checks the payment, checks the
+balance, and deduplicates on an in-memory set. Under one worker with deliveries in order it
+is correct, and the harness says so in the first row rather than hiding it.
+
+Building that harness found two real defects in PayNaka itself. `check_refund_bounds` read
+the refundable balance and the ledger was written after the rail call, so twenty concurrent
+refunds on one payment were **all twenty approved** and sixteen were stopped only because
+the gateway independently refused — the money came out right and the enforcement was
+fiction. It is an atomic balance claim now, and the gate approves exactly four. Separately,
+the simulator raised a transport error for definitive refusals, so "refund exceeds capture"
+was being filed as *outcome unknown*.
+
+The same checkpoint enforces money-correctness invariants, including Indian payments
+regulation as executable policy:
 
 | Invariant | Prevents | Source |
 | --------- | -------- | ------ |
@@ -161,15 +256,30 @@ policy:
 
 ```bash
 uv sync --all-extras
-cp .env.example .env          # add Razorpay TEST keys + Anthropic key
 make check                    # lint · types · tests · secret scan
-make demo-attack              # the headline: poisoned catalog, gate off then on
-make bench                    # four defences → RESULTS.md
+```
+
+**These four need no keys, no network, and no model.** They are the demonstrations, and
+every number in this README above came out of them:
+
+```bash
+make toctou                   # the price changes between reading it and paying it
+make chaos                    # six ways a gateway loses money with nobody attacking
+make sentinel                 # the detector, with its false-positive rate and margin
+make demo-attack              # poisoned catalog, checkpoint off then on
+```
+
+These need a key, and cost money:
+
+```bash
+cp .env.example .env          # Razorpay TEST keys + a model key
+make toctou-probe             # cents: do real agents notice the price changed?
+make bench                    # four defences over the corpus → RESULTS.md
 ```
 
 Works fully offline: `PAYNAKA_RAIL=sim` runs a deterministic in-process payment simulator, so the
-test suite and the benchmark need no credentials. Set `PAYNAKA_RAIL=test` to drive the real
-Razorpay test-mode API.
+test suite and every demonstration above need no credentials. Set `PAYNAKA_RAIL=test` to drive the
+real Razorpay test-mode API.
 
 ## Safety and scope
 
@@ -189,7 +299,7 @@ Razorpay test-mode API.
 | [THREATMODEL.md](docs/THREATMODEL.md) | what is defended, what is not, and the design refusals |
 | [HAAT.md](docs/HAAT.md) | corpus design, held-out families, evidence discipline, cost |
 | [DIVERSITY.md](docs/DIVERSITY.md) | generated corpus-diversity report |
-| [RESULTS.md](RESULTS.md) | generated benchmark output |
+| RESULTS.md | generated by `make bench`. Absent here, and the benchmark section above says why |
 
 ## The console
 
@@ -198,28 +308,51 @@ Razorpay test-mode API.
 It is built on [`@razorpay/blade`](https://github.com/razorpay/blade), Razorpay's own
 MIT-licensed design system, the one that powers razorpay.com. So it does not merely
 resemble a Razorpay product: it is assembled from the same components and ships their
-brand faces. Four screens: **Live** (the demo), **Benchmark** (the four-way leaderboard),
-**Replay** (the audit chain, with a button that rehashes it), and **Policy** (the
-envelope, and Indian payments regulation with its sources named).
+brand faces. Four screens: **Live** (the demo), **Benchmark** (what has actually been
+measured — the price-mutation table, the webhook scenarios, the detector with its margin,
+and an honest empty state where the injection sweep would go), **Replay** (the audit
+chain, with a button that rehashes it), and **Policy** (the envelope, and Indian payments
+regulation with its sources named).
+
+`make console-data` writes the Benchmark screen's data with no keys and no network, and
+`make dev` runs it first, so the screen is never empty by accident. The committed JSON is
+checked against a fresh run by the test suite, because committed evidence that nothing
+verifies is worse than none.
 
 ## Testing
 
-828 tests, of which **578 are adversarial**. Every module ships both:
+1,154 tests, of which **759 are adversarial**. 88% branch coverage on `paynaka/`,
+`mypy --strict` clean. Every module ships both:
 
-- **forward tests** - does it do the right thing?
-- **adversarial tests** - how does it break? Malformed input, boundary values, replay,
+- **forward tests** — does it do the right thing?
+- **adversarial tests** — how does it break? Malformed input, boundary values, replay,
   tampering, injection, unicode homoglyphs, concurrency, duplicate delivery, clock
   manipulation, oversize input.
 
-The adversarial suite found real defects during construction, each now pinned as a named
-regression test: unicode digit smuggling through `\d`, invisible-character padding
-through `\s`, a trailing-newline bypass from Python's `$`, a credential leak in an error
-scrubber, a ledger that read rupee strings as paise, and a gate hole where an order
-declaring no line items skipped the SKU allow-list entirely.
+Plus **24 property tests** over generated inputs, passing at 5,000 examples each. The
+headline is soundness, stated seven ways: *whenever the gate says ALLOW, the request was
+inside the mandate* — on every dimension the mandate constrains. Its complements are
+asserted too, because a gate that denied everything would satisfy soundness perfectly:
+one test proves the generators produce approvals at all, another that a request genuinely
+inside the mandate is not refused.
+
+Every defect below was found by this suite and is now pinned as a named regression:
+
+| Found by | Defect |
+| --- | --- |
+| adversarial | unicode digit smuggling through `\d`; invisible-character padding through `\s` |
+| adversarial | a trailing-newline bypass from Python's `$`; a credential leak in an error scrubber |
+| adversarial | a ledger that read rupee strings as paise |
+| adversarial | an order declaring no line items skipped the SKU allow-list entirely |
+| chaos harness | the refund bound was read-then-write; 20 concurrent refunds, all 20 approved |
+| chaos harness | definitive refusals filed as *outcome unknown*, teaching reconciliation to chase money that never moved |
+| property tests | one line item with `qty=-1` crashed the engine while writing the audit record **for its own denial** — a one-field denial of service |
+| property tests | checks were evaluated eagerly, so a later check that raised overrode an earlier clean, specific denial |
 
 ```bash
-make check       # ruff, mypy --strict, pytest, gitleaks
-make test-adv    # the adversarial suite on its own
+make check                          # ruff, mypy --strict, pytest, gitleaks
+make test-adv                       # the adversarial suite on its own
+HYPOTHESIS_PROFILE=thorough pytest  # 5,000 examples per property
 ```
 
 ## Licence
