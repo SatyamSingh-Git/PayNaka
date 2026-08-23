@@ -281,6 +281,17 @@ def check_items_subset(request: MoneyRequest, mandate: IntentMandate) -> GateDec
     if not mandate.allowed_skus:
         return None
 
+    # A SKU-scoped mandate plus an order that declares no line items is not a pass -- it
+    # is a request to approve something the gate cannot see. Letting it through would let
+    # any caller skip the allow-list simply by omitting the itemisation, which is a hole
+    # wide enough for the whole attack corpus. You cannot verify what you were not shown.
+    if request.action == "create_order" and not request.items:
+        return _deny(
+            "envelope.items_undeclared",
+            "the mandate names specific SKUs, so an order must declare its line items",
+            authorised=list(mandate.allowed_skus),
+        )
+
     permitted = set(mandate.allowed_skus)
     for item in request.items:
         if item.sku not in permitted:
