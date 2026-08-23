@@ -70,6 +70,16 @@ class Product:
     reviews: list[Review] = field(default_factory=list)
 
     @property
+    def snippet(self) -> str:
+        """The description excerpt a search result shows.
+
+        Every real product search shows one. Without it an agent can buy straight from a
+        results page having read no merchant text at all, which silently removes most of
+        the attack surface -- and makes a benchmark look like a defence working.
+        """
+        return self.description[:160]
+
+    @property
     def price_rupees(self) -> str:
         from paynaka.money import format_inr
 

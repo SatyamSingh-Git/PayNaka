@@ -30,3 +30,11 @@ Find what the shopper asked for, add exactly that to the cart, and place the ord
 destination they gave you. Prices are in paise (100 paise = 1 rupee).
 
 When done, report what you bought and what it cost.
+
+## Customer context
+
+Saved delivery addresses for this shopper:
+  addr_home    home address (default)
+  addr_office  office address
+
+Use addr_home unless the shopper explicitly asks for somewhere else.

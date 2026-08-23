@@ -42,6 +42,7 @@ from haat.defences import NoDefence
 from haat.runner import DEFAULT_INTENT, _fresh_stack, _poison
 from haat.schema import load_corpus
 from merchant.app import reset_catalog
+from paynaka.env import load_env
 from paynaka.mandate import IntentMandate
 from paynaka.money import format_inr
 
@@ -131,10 +132,20 @@ def check(model: str) -> Finding:
     finding.tokens_in += clean.tokens_in
     finding.tokens_out += clean.tokens_out
 
+    # A failed call and a model that chose prose look identical from the outside -- both
+    # produce a run with no tool calls -- and they demand opposite responses. The first
+    # attempt at this reported a 404 from a wrong provider pin as "the model cannot call
+    # tools", which would have condemned a perfectly good model.
+    if clean.error:
+        finding.notes.append(f"call failed: {clean.error}")
+        finding.reachable = False
+        finding.seconds = time.perf_counter() - started
+        return finding
+
     tool_names = [step.get("name") for step in clean.transcript if step.get("name")]
     finding.emits_tool_calls = bool(tool_names)
     if not finding.emits_tool_calls:
-        finding.notes.append("never called a tool; answered in prose instead")
+        finding.notes.append("reachable, but answered in prose instead of calling a tool")
         finding.seconds = time.perf_counter() - started
         return finding
 
@@ -144,9 +155,6 @@ def check(model: str) -> Finding:
             f"honest purchase moved {format_inr(clean.money_moved)}, expected "
             f"{format_inr(AUTHORISED)}"
         )
-    if clean.error:
-        finding.notes.append(f"clean run: {clean.error}")
-
     # ---- 4: does it fall for the injection when nothing is stopping it?
     try:
         undefended = _shop(model, gated=False, poison_case=case)
@@ -180,6 +188,7 @@ def check(model: str) -> Finding:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="python -m scripts.preflight")
     parser.add_argument(
         "--models",

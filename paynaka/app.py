@@ -35,6 +35,7 @@ from merchant.catalog import CATALOG, Review
 from paynaka.audit import AuditChain
 from paynaka.clock import FrozenClock
 from paynaka.engine import PayNaka
+from paynaka.env import load_env
 from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
 from paynaka.money import format_inr
 from paynaka.policy import Policy
@@ -114,6 +115,9 @@ class Hub:
         self.audit.close()
         self.subscribers.clear()
 
+
+# Before the Hub is constructed: it builds a rail, which reads PAYNAKA_RAIL.
+load_env()
 
 hub = Hub()
 

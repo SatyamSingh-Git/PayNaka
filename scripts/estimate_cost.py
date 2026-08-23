@@ -26,6 +26,7 @@ from buyer.tools import TOOL_SCHEMAS, ToolBox
 from haat.runner import DEFAULT_INTENT, _fresh_stack, _poison
 from haat.schema import load_corpus
 from merchant.app import reset_catalog
+from paynaka.env import load_env
 from paynaka.mandate import IntentMandate
 
 # Rupee-per-million-token rates are not here on purpose; prices move. These are the
@@ -148,6 +149,7 @@ def _project(per_turn: list[float], turns: int) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="python -m scripts.estimate_cost")
     parser.add_argument("--sample", type=int, default=12, help="cases to measure per kind")
     args = parser.parse_args(argv)

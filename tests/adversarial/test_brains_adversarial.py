@@ -17,7 +17,7 @@ import json
 import pytest
 
 from buyer.brains import (
-    DEFAULT_PROVIDER_ORDER,
+    DEFAULT_PINS,
     BrainError,
     ClaudeBrain,
     OpenRouterBrain,
@@ -178,8 +178,13 @@ class TestToolSchemaTranslation:
 
 class TestReproducibility:
     def test_provider_is_pinned_for_every_known_model(self) -> None:
-        """OpenRouter fans one slug across many hosts. Two quantisations are two systems."""
-        for slug, providers in DEFAULT_PROVIDER_ORDER.items():
+        """OpenRouter fans one slug across many hosts. Two quantisations are two systems.
+
+        DeepSeek V4 Flash alone is served at fp4 and fp8 by different hosts. Leaving that
+        to the router would make the benchmark's percentages move for reasons nothing in
+        this repository controls.
+        """
+        for slug, (providers, _quants) in DEFAULT_PINS.items():
             assert providers, f"{slug} has no pinned provider"
 
     def test_fallbacks_are_off_by_default(self) -> None:
@@ -192,8 +197,11 @@ class TestReproducibility:
         assert brain.temperature == 0.0
 
     def test_an_unknown_slug_gets_no_pin_rather_than_a_wrong_one(self) -> None:
+        """A wrong pin 404s with fallbacks off, and that failure is easy to misread as
+        the model being incapable. No pin is better than a guessed one."""
         brain = OpenRouterBrain(model="someone/experimental-model", _client=object())
         assert brain.provider_order == []
+        assert brain.quantizations is None
 
 
 class TestBuildBrain:

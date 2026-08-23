@@ -42,6 +42,7 @@ from merchant.catalog import Review, find
 from paynaka.audit import AuditChain
 from paynaka.clock import FrozenClock
 from paynaka.engine import PayNaka
+from paynaka.env import load_env
 from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
 from paynaka.policy import Policy
 from paynaka.rails.sim import SimRail
@@ -313,6 +314,7 @@ def _freeze_tag_exists() -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_env()
     parser = argparse.ArgumentParser(prog="python -m haat.runner")
     parser.add_argument("--corpus", choices=["visible", "sealed"], default="visible")
     parser.add_argument("--defences", default="all")

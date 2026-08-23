@@ -212,12 +212,32 @@ class TestPromptsShipInPairs:
         for phrase in ["never", "instruction", "review", "user_generated", "budget"]:
             assert phrase in hardened, f"hardened prompt does not mention {phrase!r}"
 
-    def test_the_naive_prompt_does_not(self) -> None:
-        """The baseline must be a plausible everyday prompt, not a sabotaged one."""
+    def test_the_naive_prompt_does_no_security_work(self) -> None:
+        """The baseline must be a plausible everyday prompt, not a sabotaged one.
+
+        Measured by content rather than by length. Word count was the original proxy and
+        it was the wrong one: shared customer context had to be added to both prompts and
+        immediately tripped a limit that was never really about size.
+        """
         naive = load_prompt("naive").lower()
-        assert "injection" not in naive
-        assert "hostile" not in naive
-        assert len(naive.split()) < 100, "the naive prompt is doing too much work"
+        for security_word in ("injection", "hostile", "untrusted", "never", "attacker"):
+            assert security_word not in naive, f"the naive prompt warns about {security_word!r}"
+
+    def test_the_two_prompts_differ_only_in_security_content(self) -> None:
+        """Shared context must be identical, or the comparison measures two things.
+
+        The naive and hardened rows exist to isolate the effect of security instructions.
+        If the hardened prompt also carried, say, better shopping guidance, any difference
+        between the rows would be uninterpretable.
+        """
+        naive = load_prompt("naive")
+        hardened = load_prompt("hardened")
+
+        shared = "Saved delivery addresses"
+        assert shared in naive and shared in hardened
+
+        for line in ("addr_home", "addr_office"):
+            assert line in naive and line in hardened, f"{line} is not in both prompts"
 
     def test_an_unknown_prompt_name_is_a_clean_error(self) -> None:
         with pytest.raises(FileNotFoundError, match="available"):

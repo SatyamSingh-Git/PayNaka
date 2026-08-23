@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import json
 import os
+import random
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -129,23 +131,30 @@ class ScriptedBrain:
 
 
 # ---------------------------------------------------------------------- openrouter
-#: Preferred serving provider per model slug.
+#: How each model is pinned: (provider slugs, quantizations).
 #:
-#: Pinning matters more than it looks. OpenRouter fans one slug out across many hosts,
-#: and two hosts serving different quantisations of the same weights are two different
-#: systems. A benchmark that silently load-balances between them is measuring the router.
-DEFAULT_PROVIDER_ORDER: dict[str, list[str]] = {
-    # Single-provider models. OpenRouter forwards straight through, so there is no
-    # routing decision to make and nothing to pin against -- the least ambiguous case.
-    "upstage/solar-pro4": ["upstage"],
-    # Multi-provider models. Pinning to the lab's own endpoint means we measure the
-    # weights the lab published rather than whichever host happened to win the routing.
-    "deepseek/deepseek-v4-flash": ["deepseek"],
-    "google/gemini-3.7-flash": ["google-vertex", "google-ai-studio"],
-    "z-ai/glm-5.2": ["z-ai"],
-    "xiaomi/mimo-v2.5": ["xiaomi"],
-    "openai/gpt-5.6-luna": ["openai"],
-    "openai/gpt-5.6-terra": ["openai"],
+#: Pinning matters far more than it looks, and OpenRouter's own endpoint listing is the
+#: proof. ``deepseek/deepseek-v4-flash`` is served by six hosts at quantizations ranging
+#: from **fp4 to fp8** -- those are materially different models wearing one slug. A
+#: benchmark that load-balances across them is measuring the router, and its percentages
+#: would move between runs for reasons nothing in this repository controls.
+#:
+#: Slugs here were read from ``/api/v1/models/{slug}/endpoints`` rather than guessed. The
+#: first attempt guessed ``deepseek`` for DeepSeek's own model, which has no endpoint under
+#: that name; with fallbacks disabled the request 404s, and the failure looked exactly like
+#: a model that could not call tools.
+DEFAULT_PINS: dict[str, tuple[list[str], list[str] | None]] = {
+    # Single provider. OpenRouter forwards straight through: nothing to route, nothing to
+    # vary. The least ambiguous subject in the set.
+    "upstage/solar-pro4": (["upstage"], None),
+    # Multi-host models, pinned to one host and one quantization.
+    "deepseek/deepseek-v4-flash": (["streamlake"], ["fp8"]),
+    "z-ai/glm-5.2": (["streamlake"], ["fp8"]),
+    "xiaomi/mimo-v2.5": (["xiaomi"], ["fp8"]),
+    # First-party hosting, no quantization variance to pin against.
+    "google/gemini-3.7-flash": (["google-vertex"], None),
+    "openai/gpt-5.6-luna": (["openai"], None),
+    "openai/gpt-5.6-terra": (["openai"], None),
 }
 
 
@@ -158,7 +167,9 @@ class OpenRouterBrain:
     max_tokens: int = 4096
     temperature: float = 0.0
     provider_order: list[str] | None = None
+    quantizations: list[str] | None = None
     allow_fallbacks: bool = False
+    max_retries: int = 4
     name: str = ""
     served_by: str | None = None
     _client: Any = field(default=None, repr=False)
@@ -184,8 +195,11 @@ class OpenRouterBrain:
                     "X-Title": "PayNaka / HAAT",
                 },
             )
+        pinned_providers, pinned_quants = DEFAULT_PINS.get(self.model, ([], None))
         if self.provider_order is None:
-            self.provider_order = DEFAULT_PROVIDER_ORDER.get(self.model, [])
+            self.provider_order = pinned_providers
+        if self.quantizations is None:
+            self.quantizations = pinned_quants
         self.name = f"openrouter:{self.model}"
 
     def next_step(
@@ -193,25 +207,44 @@ class OpenRouterBrain:
     ) -> Step:
         extra: dict[str, Any] = {}
         if self.provider_order:
-            extra["provider"] = {
+            provider: dict[str, Any] = {
                 "order": self.provider_order,
                 "allow_fallbacks": self.allow_fallbacks,
             }
+            if self.quantizations:
+                provider["quantizations"] = self.quantizations
+            extra["provider"] = provider
 
-        try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": system}, *_to_openai(history)],
-                tools=[_openai_tool(tool) for tool in tools],
-                tool_choice="auto",
-                max_tokens=self.max_tokens,
-                # Zero temperature is a reproducibility choice, not a quality one: a
-                # benchmark that resamples on every run cannot demonstrate a regression.
-                temperature=self.temperature,
-                extra_body=extra or None,
-            )
-        except Exception as exc:
-            raise BrainError(f"model call failed: {exc}") from exc
+        # Pinning a provider buys reproducibility and costs resilience: a shared-pool
+        # rate limit on that one host is fatal rather than a routing inconvenience. Over a
+        # two-thousand-run sweep that is a certainty, not a risk, so transient failures are
+        # retried with backoff. Retries do not change which host serves the request, so
+        # the reproducibility the pin buys is preserved.
+        last: Exception | None = None
+        for attempt in range(self.max_retries):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "system", "content": system}, *_to_openai(history)],
+                    tools=[_openai_tool(tool) for tool in tools],
+                    tool_choice="auto",
+                    max_tokens=self.max_tokens,
+                    # Zero temperature is a reproducibility choice, not a quality one: a
+                    # benchmark that resamples every run cannot demonstrate a regression.
+                    temperature=self.temperature,
+                    extra_body=extra or None,
+                )
+                break
+            except Exception as exc:
+                last = exc
+                if not _transient(exc) or attempt == self.max_retries - 1:
+                    raise BrainError(f"model call failed: {exc}") from exc
+                # Jittered backoff. Without jitter a bank of parallel workers retries in
+                # lockstep and re-creates the burst that caused the limit.
+                delay = (2**attempt) + random.random()  # noqa: S311 - jitter, not crypto
+                time.sleep(delay)
+        else:  # pragma: no cover - the loop always breaks or raises
+            raise BrainError(f"model call failed after {self.max_retries} attempts: {last}")
 
         # Recorded per run. A result that does not say which host served it is not
         # reproducible, however precise its percentages look.
@@ -374,6 +407,22 @@ def _to_anthropic(history: Sequence[Turn]) -> list[dict[str, Any]]:
                 }
             )
     return messages
+
+
+def _transient(exc: Exception) -> bool:
+    """Whether an error is worth retrying.
+
+    Rate limits and 5xx are the provider asking us to wait. A 400 or a 404 is us being
+    wrong, and retrying it just burns the budget more slowly.
+    """
+    status = getattr(exc, "status_code", None)
+    if status in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in ("rate-limited", "rate limit", "timeout", "timed out", "overloaded")
+    )
 
 
 def _openai_tool(tool: dict[str, Any]) -> dict[str, Any]:

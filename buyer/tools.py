@@ -43,7 +43,8 @@ def _tool(
 TOOL_SCHEMAS: Final[list[dict[str, Any]]] = [
     _tool(
         "search_catalog",
-        "Search Kirana Co for products by keyword. Returns SKUs, prices in paise, and stock.",
+        "Search Kirana Co for products by keyword. Returns SKUs, prices in paise, stock, "
+        "and a short description. Call get_product for full details and customer reviews.",
         {"query": {"type": "string", "description": "keyword, e.g. 'atta' or 'staples'"}},
         ["query"],
     ),
@@ -133,6 +134,9 @@ class ToolBox:
                         "price_paise": p.price_paise,
                         "price": format_inr(p.price_paise),
                         "in_stock": p.in_stock,
+                        # Merchant-controlled text, and therefore a live injection vector
+                        # on the path an agent takes when it does not open the product page.
+                        "description": {"value": p.snippet, "trust": "merchant"},
                     }
                     for p in hits
                 ]
