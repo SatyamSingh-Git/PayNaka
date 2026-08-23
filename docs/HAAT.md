@@ -128,17 +128,55 @@ RESULTS.md**. A scripted agent cannot be injected, so its numbers would be meani
 
 ## Cost
 
-The full sweep is roughly 540 cases × 4 defences ≈ 2,160 agent runs. `PAYNAKA_BENCH_MODEL`
-selects the model.
+Measured, not guessed. `python -m scripts.estimate_cost` runs the scripted agent through
+real corpus cases, captures every request that *would* have gone to a model — system
+prompt, tool schemas, and the full history at each turn — and counts it with tiktoken.
 
-Running the bulk on a cheaper tier and re-running a stratified sample on the primary model
-is defensible rather than a dodge: **PayNaka's guarantee is model-independent by
-construction** — the gate is deterministic code that never consults a model — so holding
-across model tiers is exactly what a structural defence should do. The model is stated on
-every table either way.
+The sweep is **2,160 runs**, not 540 × 4. Benign cases pair with the visible sweep only;
+re-running them against the sealed corpus would cost money to learn nothing.
 
-The catalog and system prompt are byte-stable across a run and are prompt-cached; check
-`cache_read_input_tokens` to confirm it is working.
+```
+visible   (252 attacks + 198 benign) x 4 defences = 1,800 runs
+sealed    (90 attacks, no benign)    x 4 defences =   360 runs
+                                                    2,160 runs
+```
+
+Measured per-turn input for one run, which is where the cost actually lives:
+
+```
+turn 1    702 tokens     system prompt + tool schemas
+turn 2    839
+turn 3  1,140            a product page, poisoned, enters the history
+turn 4  1,233
+turn 5  1,342
+```
+
+Each turn resends everything before it, so **input grows quadratically in turns** while
+output grows linearly. That is why the turn count matters more than the case count:
+
+| Turns per run | Input | Output | DeepSeek V4 Flash | GPT-5.6 Luna | GPT-5.6 Terra |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 5 — straight to checkout | 11.4M | 2.38M | **$0.79** | $5.12 | $51.22 |
+| 8 — realistic, one retry | 22.1M | 3.80M | **$1.46** | $8.98 | $89.81 |
+| 12 — hits `max_turns` | 41.2M | 5.70M | **$2.58** | $15.08 | $150.85 |
+
+Five turns is a floor: it is what the scripted agent takes going straight to checkout. A
+real model explores, and on the `naka` row it often retries after a denial, so eight is
+the number to budget against.
+
+Add roughly **25%** if you run the judge defence, which makes an extra model call per
+money action and a second when the cheap tier hedges.
+
+Nothing above assumes prompt caching. Anthropic caching would cut input materially;
+OpenRouter support varies by host, so it is left out rather than assumed.
+
+### Which model
+
+`PAYNAKA_BENCH_MODEL` selects it. Running the bulk on a cheap tier and re-running a
+stratified sample on a stronger one is defensible rather than a dodge: **PayNaka's
+guarantee is model-independent by construction** — the gate is deterministic code that
+never consults a model — so holding across tiers is exactly what a structural defence
+should do. Every table names the model and the serving host.
 
 ## What HAAT does not measure
 
