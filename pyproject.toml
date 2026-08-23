@@ -93,6 +93,9 @@ known-first-party = ["paynaka", "merchant", "buyer", "haat", "chaos"]
 # sentinel.py matches payloads that spell things with lookalike characters on
 # purpose, so RUF001 fires on the patterns written to catch them.
 "paynaka/sentinel.py" = ["RUF001"]
+# test_tty.py parametrises over exactly the characters a legacy codepage cannot
+# print, which is what RUF001 is for and what this file is about.
+"tests/unit/test_tty.py" = ["RUF001"]
 # build_corpus.py carries homoglyph and invisible-character payloads by design --
 # they are the obfuscated_payload family. RUF001-003 flag exactly those.
 "haat/build_corpus.py" = ["RUF001", "RUF002", "RUF003"]

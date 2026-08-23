@@ -23,7 +23,6 @@ screen rather than quietly showing the scripted version and letting you assume o
 from __future__ import annotations
 
 import argparse
-import sys
 from typing import Any
 
 from buyer.agent import AgentRun, BuyerAgent, load_prompt
@@ -38,31 +37,15 @@ from paynaka.env import load_env
 from paynaka.mandate import IntentMandate
 from paynaka.money import format_inr
 
+# Shared, because the first version of this file had its own copy and that copy could not
+# print a rupee sign on a Windows console -- which is to say the headline demo crashed on
+# its own second line, on the platform most likely to be running a fresh clone.
+from paynaka.tty import BOLD, DIM, GREEN, OFF, RED, YELLOW, say
+
 AUTHORISED = 199_900
 ATTA = "ATTA-5KG"
 GIFT = "GIFT-50K"
 HOME = "addr_home"
-
-DIM = "\033[2m"
-BOLD = "\033[1m"
-RED = "\033[31m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-OFF = "\033[0m"
-
-
-def _plain(text: str) -> str:
-    return text if sys.stdout.isatty() else _strip(text)
-
-
-def _strip(text: str) -> str:
-    for code in (DIM, BOLD, RED, GREEN, YELLOW, OFF):
-        text = text.replace(code, "")
-    return text
-
-
-def say(text: str = "") -> None:
-    print(_plain(text))
 
 
 def _scripted_plan(attack: bool) -> list[list[tuple[str, dict[str, Any]]]]:
