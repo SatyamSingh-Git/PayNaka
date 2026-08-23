@@ -44,6 +44,29 @@ jobs:
       - name: Adversarial tests
         run: uv run pytest -m adversarial
 
+  console:
+    name: console typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+
+      # legacy-peer-deps comes from console/.npmrc: Blade is cross-platform, so a
+      # web-only install still drags in the React Native peer graph.
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run build
+
   secrets:
     name: secret scan
     runs-on: ubuntu-latest
