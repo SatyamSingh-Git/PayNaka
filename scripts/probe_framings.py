@@ -74,7 +74,7 @@ def _run(model: str, case: AttackCase) -> Probe:
     reset_catalog()
     _poison(case)
 
-    naka, signer, rail, clock = _fresh_stack(f"probe:{model}:{case.case_id}")
+    _naka, signer, rail, clock = _fresh_stack(f"probe:{model}:{case.case_id}")
     mandate = IntentMandate.create(
         clock=clock,
         subject="cust_kirana_001",
