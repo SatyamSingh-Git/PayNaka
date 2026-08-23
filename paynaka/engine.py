@@ -27,7 +27,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from paynaka.audit import AuditChain
+from paynaka.anchor import AnchorLog, Notary, rail_note
+from paynaka.audit import GENESIS, AuditChain, AuditRecord
 from paynaka.clock import Clock, SystemClock
 from paynaka.gate import (
     GateDecision,
@@ -99,6 +100,9 @@ class PayNaka:
         audit: AuditChain,
         verifier: MandateVerifier,
         clock: Clock | None = None,
+        notary: Notary | None = None,
+        anchors: AnchorLog | None = None,
+        anchor_every: int = 20,
     ) -> None:
         self.rail = rail
         self.policy = policy
@@ -106,6 +110,13 @@ class PayNaka:
         self.audit = audit
         self.verifier = verifier
         self.clock = clock or SystemClock()
+
+        # Witnessing, optional and off by default so nothing that already works changes
+        # shape. Supply a notary and a log and the chain stops being merely self-consistent:
+        # see paynaka/anchor.py for what each of the three tiers actually buys.
+        self.notary = notary
+        self.anchors = anchors
+        self.anchor_every = anchor_every
 
     # ---------------------------------------------------------------- public API
     def execute(
@@ -127,7 +138,7 @@ class PayNaka:
         decision = evaluate(
             request, mandate, state=self.state, policy=self.policy, clock=self.clock
         )
-        record = self.audit.append(
+        record = self._write(
             {
                 "kind": "decision",
                 "request": _describe(request),
@@ -139,11 +150,11 @@ class PayNaka:
                     "max_total": mandate.max_total,
                 },
                 "provenance": provenance,
-            },
-            clock=self.clock,
+            }
         )
 
         if decision.verdict is not Verdict.ALLOW:
+            self._account_for_denial(decision, mandate)
             return ExecutionResult(
                 decision=decision,
                 executed=False,
@@ -177,7 +188,7 @@ class PayNaka:
     ) -> ExecutionResult:
         key = request.idempotency_key or f"auto_{uuid.uuid4().hex}"
         try:
-            result = self._dispatch(request, key)
+            result = self._dispatch(request, mandate, key)
         except RailDeclined as exc:
             # Definitive: the rail says it did not and will not. The claim the gate took
             # on the refundable balance goes back, so the next request can use it.
@@ -210,15 +221,14 @@ class PayNaka:
             )
 
         self._post(request, result)
-        settled = self.audit.append(
+        settled = self._write(
             {
                 "kind": "executed",
                 "action": request.action,
                 "request_id": request.request_id,
                 "rail": self.rail.name,
                 "result": _describe_result(result),
-            },
-            clock=self.clock,
+            }
         )
         return ExecutionResult(
             decision=decision,
@@ -229,14 +239,115 @@ class PayNaka:
             provenance=provenance,
         )
 
-    def _dispatch(self, request: MoneyRequest, key: str) -> Any:
+    def _account_for_denial(self, decision: GateDecision, mandate: IntentMandate) -> None:
+        """Count a refusal, and withdraw the session's authority if it has had too many.
+
+        The gate decides; this does the accounting. Keeping them apart matters: a check
+        that both refuses *and* changes what future checks will say is a check nobody can
+        reason about in isolation, and every check in ``gate.py`` is a function somebody
+        should be able to read on its own.
+
+        A refusal the gate already made permanent is not counted again -- a revoked
+        session hammering the wall must not keep inflating a number that has already done
+        its job. Nor is a STEP_UP: waiting for a human is not being refused.
+        """
+        breaker = self.policy.circuit_breaker
+        if not breaker.enabled or decision.verdict is not Verdict.DENY:
+            return
+        if decision.check_id == "revoked":
+            return
+
+        session_total = self.state.bump_denial(f"session:{mandate.session_id}", clock=self.clock)
+        subject_total = self.state.bump_denial(f"subject:{mandate.subject}", clock=self.clock)
+
+        tripped: list[tuple[str, str, int, int]] = []
+        if session_total >= breaker.denials_per_session:
+            tripped.append(
+                ("session", mandate.session_id, session_total, breaker.denials_per_session)
+            )
+        if subject_total >= breaker.denials_per_subject:
+            tripped.append(("subject", mandate.subject, subject_total, breaker.denials_per_subject))
+
+        for scope, value, total, limit in tripped:
+            if self.state.is_revoked(value):
+                continue
+            self.state.revoke(value, clock=self.clock)
+            self._write(
+                {
+                    "kind": "circuit.tripped",
+                    "scope": scope,
+                    "value": value,
+                    "denials": total,
+                    "limit": limit,
+                    "detail": (
+                        f"{total} refusals in one day on this {scope}; authority withdrawn. "
+                        f"An operator clears it with unrevoke() and clear_denials()."
+                    ),
+                }
+            )
+
+    def _write(self, payload: dict[str, Any]) -> AuditRecord:
+        """Append to the chain, then let the notary witness it if it is time.
+
+        Every audit write in this class goes through here. That is the point: witnessing
+        attached to individual call sites is witnessing somebody will forget to attach,
+        and the first version of this proved it by anchoring only after decision records.
+        """
+        record = self.audit.append(payload, clock=self.clock)
+        self._maybe_anchor()
+        return record
+
+    def _maybe_anchor(self) -> None:
+        """Ask the notary to witness the chain, every ``anchor_every`` records.
+
+        Periodic rather than per-record because a witness costs a signature and the
+        protection is not per-record: an anchor at length N pins everything at or before
+        N. The interval is the window an attacker gets, and it is a knob rather than a
+        constant so an operator can decide how large a window they will accept.
+        """
+        if self.notary is None or self.anchors is None:
+            return
+        length = len(self.audit)
+        if length and length % self.anchor_every == 0:
+            self.anchors.append(self.notary.witness(self.audit, clock=self.clock))
+
+    def anchor_now(self) -> None:
+        """Witness immediately. For shutdown, for a demo, and for after an incident."""
+        if self.notary is None or self.anchors is None:
+            raise RuntimeError("no notary configured; nothing can witness this chain")
+        self.anchors.append(self.notary.witness(self.audit, clock=self.clock))
+
+    def _rail_notes(self, request: MoneyRequest, mandate: IntentMandate) -> dict[str, str]:
+        """What PayNaka asks the gateway to remember about this call.
+
+        The audit head is the interesting one. Razorpay stores these against the payment
+        and hands them back on read, so every money movement becomes a witness to the
+        state of the local chain at the moment it happened -- and an attacker who rewrites
+        that chain has to rewrite Razorpay's records too, which are not theirs to rewrite.
+
+        Sent whether or not a notary is configured, because it costs nothing and the
+        gateway is the most external witness available.
+        """
+        head = self.audit.head()
+        notes = {
+            "paynaka_mandate": mandate.mandate_id[:64],
+            "paynaka_request": request.request_id[:64],
+        }
+        if head != GENESIS:
+            notes["paynaka_audit_head"] = rail_note(head)
+            notes["paynaka_audit_len"] = str(len(self.audit))
+        return {k: v for k, v in notes.items() if v}
+
+    def _dispatch(self, request: MoneyRequest, mandate: IntentMandate, key: str) -> Any:
         action = request.action
+        notes = self._rail_notes(request, mandate)
         if action == "create_order":
             return self.rail.create_order(
                 amount=request.effective_amount,
                 currency=request.currency,
                 receipt=request.request_id,
                 idempotency_key=key,
+                notes=notes,
             )
         if action == "capture_payment":
             if not request.payment_id:
@@ -245,6 +356,7 @@ class PayNaka:
                 payment_id=request.payment_id,
                 amount=request.effective_amount,
                 idempotency_key=key,
+                notes=notes,
             )
         if action == "create_refund":
             if not request.payment_id:
@@ -253,6 +365,7 @@ class PayNaka:
                 payment_id=request.payment_id,
                 amount=request.effective_amount,
                 idempotency_key=key,
+                notes=notes,
             )
         raise RailError(f"no rail binding for action {action!r}")
 
@@ -285,15 +398,14 @@ class PayNaka:
     def _append(
         self, kind: str, request: MoneyRequest, detail: str, provenance: dict[str, Any]
     ) -> None:
-        self.audit.append(
+        self._write(
             {
                 "kind": kind,
                 "action": request.action,
                 "request_id": request.request_id,
                 "detail": detail,
                 "provenance": provenance,
-            },
-            clock=self.clock,
+            }
         )
 
     def _record_rejection(
@@ -307,15 +419,14 @@ class PayNaka:
             evidence={"request_id": request.request_id},
             request_id=request.request_id,
         )
-        record = self.audit.append(
+        record = self._write(
             {
                 "kind": "decision",
                 "request": _describe(request),
                 "decision": decision.to_dict(),
                 "mandate": None,
                 "provenance": provenance,
-            },
-            clock=self.clock,
+            }
         )
         return ExecutionResult(
             decision=decision,

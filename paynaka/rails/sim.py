@@ -123,7 +123,13 @@ class SimRail:
 
     # ---------------------------------------------------------------- operations
     def create_order(
-        self, *, amount: int, currency: str, receipt: str, idempotency_key: str
+        self,
+        *,
+        amount: int,
+        currency: str,
+        receipt: str,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
     ) -> OrderResult:
         _require_amount(amount)
         with self._lock:
@@ -141,7 +147,9 @@ class SimRail:
                 currency=currency,
                 status="created",
                 receipt=receipt,
-                raw={"entity": "order", "attempts": 0},
+                # Stored and echoed back, exactly as a gateway does. The audit head
+                # PayNaka puts here is what makes this record a witness.
+                raw={"entity": "order", "attempts": 0, "notes": dict(notes or {})},
             )
             return self._remember(idempotency_key, result)  # type: ignore[no-any-return]
 
@@ -192,7 +200,12 @@ class SimRail:
             return result
 
     def capture_payment(
-        self, *, payment_id: str, amount: int, idempotency_key: str
+        self,
+        *,
+        payment_id: str,
+        amount: int,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
     ) -> PaymentResult:
         _require_amount(amount)
         with self._lock:
@@ -219,7 +232,7 @@ class SimRail:
                 currency=payment.currency,
                 status="captured",
                 method=payment.method,
-                raw={"entity": "payment"},
+                raw={"entity": "payment", "notes": dict(notes or {})},
             )
             self._remember(idempotency_key, result)
             self._emit("payment.captured", result)
@@ -242,7 +255,14 @@ class SimRail:
                 },
             )
 
-    def create_refund(self, *, payment_id: str, amount: int, idempotency_key: str) -> RefundResult:
+    def create_refund(
+        self,
+        *,
+        payment_id: str,
+        amount: int,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
+    ) -> RefundResult:
         _require_amount(amount)
         with self._lock:
             cached = self._replay(idempotency_key)
@@ -268,7 +288,7 @@ class SimRail:
                 payment_id=payment_id,
                 amount=amount,
                 status="processed",
-                raw={"entity": "refund"},
+                raw={"entity": "refund", "notes": dict(notes or {})},
             )
             self._remember(idempotency_key, result)
             self._emit("refund.processed", result)

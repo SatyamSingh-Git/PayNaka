@@ -82,12 +82,24 @@ class Rail(Protocol):
     Every method takes an explicit ``idempotency_key``. A rail that cannot be asked to be
     idempotent cannot be safely retried, and an agent that cannot safely retry will
     eventually double-charge someone.
+
+    Every money method takes ``notes``: free-form key-value metadata the gateway stores
+    against the record and hands back on read. PayNaka puts the audit chain's tip in there
+    (see ``paynaka/anchor.py``), which turns every payment into a witness -- an attacker
+    who rewrites the merchant's local chain still has to rewrite Razorpay's records, and
+    those are not theirs to rewrite.
     """
 
     name: str
 
     def create_order(
-        self, *, amount: int, currency: str, receipt: str, idempotency_key: str
+        self,
+        *,
+        amount: int,
+        currency: str,
+        receipt: str,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
     ) -> OrderResult: ...
 
     def pay_order(
@@ -95,11 +107,21 @@ class Rail(Protocol):
     ) -> PaymentResult: ...
 
     def capture_payment(
-        self, *, payment_id: str, amount: int, idempotency_key: str
+        self,
+        *,
+        payment_id: str,
+        amount: int,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
     ) -> PaymentResult: ...
 
     def fetch_payment(self, payment_id: str) -> PaymentResult: ...
 
     def create_refund(
-        self, *, payment_id: str, amount: int, idempotency_key: str
+        self,
+        *,
+        payment_id: str,
+        amount: int,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
     ) -> RefundResult: ...

@@ -29,6 +29,7 @@ import os
 import pathlib
 import secrets
 import uuid
+from collections.abc import Mapping
 from dataclasses import MISSING, asdict, dataclass, fields
 from typing import Any, Final
 
@@ -119,6 +120,24 @@ class IntentMandate:
     nonce: str
     version: int = MANDATE_VERSION
 
+    #: What each SKU cost at the moment the shopper agreed, as ``(sku, paise)`` pairs.
+    #:
+    #: A budget bounds the total; this bounds the *price of the thing*. They are different
+    #: questions and only the first was being asked. A shopper who says "atta, under two
+    #: thousand" has been shown a bag at Rs 1,999, and a merchant who quietly reprices it
+    #: to Rs 2,400 before checkout has not exceeded the budget and has still taken Rs 401
+    #: nobody agreed to.
+    #:
+    #: Pairs rather than a mapping so the mandate stays hashable and its canonical
+    #: encoding stays a stable sorted list. Empty means no reference was captured, which
+    #: is the honest default: not every shopper was shown a price.
+    reference_prices: tuple[tuple[str, int], ...] = ()
+
+    #: How far a price may drift from its reference before it is no longer what was
+    #: agreed, in basis points. 0 means exactly; 200 is half a percent of slack for
+    #: rounding and honest repricing. Small by default, because drift is the attack.
+    price_tolerance_bps: int = 0
+
     def __post_init__(self) -> None:
         self._validate()
 
@@ -138,6 +157,8 @@ class IntentMandate:
         allowed_destinations: tuple[str, ...] | list[str] = (),
         allowed_actions: tuple[str, ...] | list[str] = ("create_order", "capture_payment"),
         requires_return_for_refund: bool = True,
+        reference_prices: Mapping[str, int] | tuple[tuple[str, int], ...] = (),
+        price_tolerance_bps: int = 0,
     ) -> IntentMandate:
         """Mint a fresh mandate. The nonce and id are generated here, never supplied."""
         if ttl_seconds <= 0:
@@ -157,6 +178,14 @@ class IntentMandate:
             allowed_destinations=tuple(allowed_destinations),
             allowed_actions=tuple(allowed_actions),
             requires_return_for_refund=requires_return_for_refund,
+            reference_prices=tuple(
+                sorted(
+                    reference_prices.items()
+                    if isinstance(reference_prices, Mapping)
+                    else reference_prices
+                )
+            ),
+            price_tolerance_bps=price_tolerance_bps,
             issued_at=now,
             expires_at=now + ttl_seconds,
             nonce=secrets.token_urlsafe(24),
@@ -183,6 +212,8 @@ class IntentMandate:
             raise MandateMalformed(f"max_total is not a valid amount: {exc}") from exc
         if self.max_total <= 0:
             raise MandateMalformed("max_total must be positive")
+
+        self._validate_reference_prices()
 
         if isinstance(self.max_qty_per_sku, bool) or not isinstance(self.max_qty_per_sku, int):
             raise MandateMalformed("max_qty_per_sku must be int")
@@ -246,11 +277,65 @@ class IntentMandate:
                 f"mandate {self.mandate_id} expired at {self.expires_at} (now {now})"
             )
 
+    def _validate_reference_prices(self) -> None:
+        if isinstance(self.price_tolerance_bps, bool) or not isinstance(
+            self.price_tolerance_bps, int
+        ):
+            raise MandateMalformed("price_tolerance_bps must be int")
+        if not 0 <= self.price_tolerance_bps <= 10_000:
+            # 10,000 basis points is 100%: a tolerance that permits doubling. Beyond that
+            # it is not a tolerance, it is the absence of one, and the way to say that is
+            # to leave reference_prices empty rather than to write a very large number.
+            raise MandateMalformed(f"price_tolerance_bps out of range: {self.price_tolerance_bps}")
+
+        if not isinstance(self.reference_prices, tuple):
+            raise MandateMalformed("reference_prices must be a tuple of (sku, paise) pairs")
+        if len(self.reference_prices) > _MAX_LIST:
+            raise MandateMalformed(f"reference_prices exceeds {_MAX_LIST} entries")
+
+        seen: set[str] = set()
+        for pair in self.reference_prices:
+            if not isinstance(pair, tuple) or len(pair) != 2:
+                raise MandateMalformed("each reference price must be a (sku, paise) pair")
+            sku, paise = pair
+            if not isinstance(sku, str) or not sku or len(sku) > _MAX_STR:
+                raise MandateMalformed(f"reference price sku is malformed: {sku!r}")
+            if sku in seen:
+                # Two prices for one SKU has no correct reading, and choosing one would be
+                # choosing on the attacker's behalf.
+                raise MandateMalformed(f"duplicate reference price for {sku!r}")
+            seen.add(sku)
+            if isinstance(paise, bool) or not isinstance(paise, int):
+                raise MandateMalformed(f"reference price for {sku!r} must be int paise")
+            if paise <= 0:
+                raise MandateMalformed(f"reference price for {sku!r} must be positive")
+            try:
+                to_paise(paise)
+            except MoneyError as exc:
+                raise MandateMalformed(f"reference price for {sku!r} rejected: {exc}") from exc
+
+    def reference_for(self, sku: str) -> int | None:
+        """The price this SKU carried when the shopper agreed, if one was captured."""
+        for candidate, paise in self.reference_prices:
+            if candidate == sku:
+                return paise
+        return None
+
+    def price_ceiling_for(self, sku: str) -> int | None:
+        """The most one unit of ``sku`` may cost: its reference plus the agreed tolerance."""
+        reference = self.reference_for(sku)
+        if reference is None:
+            return None
+        return reference + (reference * self.price_tolerance_bps) // 10_000
+
     # ---------------------------------------------------------------- serialisation
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         for key in ("allowed_skus", "allowed_destinations", "allowed_actions"):
             data[key] = list(data[key])
+        # Sorted, so two mandates listing the same references in a different order sign to
+        # the same bytes: one intent, one encoding.
+        data["reference_prices"] = [[sku, paise] for sku, paise in sorted(self.reference_prices)]
         return data
 
     @classmethod
@@ -279,6 +364,17 @@ class IntentMandate:
             if not isinstance(value, list | tuple):
                 raise MandateMalformed(f"{key} must be a list")
             payload[key] = tuple(value)
+
+        if "reference_prices" in payload:
+            raw_refs = payload["reference_prices"]
+            if not isinstance(raw_refs, list | tuple):
+                raise MandateMalformed("reference_prices must be a list")
+            pairs: list[tuple[str, int]] = []
+            for entry in raw_refs:
+                if not isinstance(entry, list | tuple) or len(entry) != 2:
+                    raise MandateMalformed("each reference price must be a [sku, paise] pair")
+                pairs.append((entry[0], entry[1]))
+            payload["reference_prices"] = tuple(pairs)
 
         try:
             return cls(**payload)

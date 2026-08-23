@@ -79,7 +79,13 @@ class RazorpayRail:
 
     # ---------------------------------------------------------------- operations
     def create_order(
-        self, *, amount: int, currency: str, receipt: str, idempotency_key: str
+        self,
+        *,
+        amount: int,
+        currency: str,
+        receipt: str,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
     ) -> OrderResult:
         _require_amount(amount)
         raw = self._call(
@@ -88,7 +94,7 @@ class RazorpayRail:
                 "amount": amount,
                 "currency": currency,
                 "receipt": receipt,
-                "notes": {"paynaka_idempotency_key": idempotency_key},
+                "notes": _notes(idempotency_key, notes),
             },
         )
         return OrderResult(
@@ -116,16 +122,33 @@ class RazorpayRail:
         )
 
     def capture_payment(
-        self, *, payment_id: str, amount: int, idempotency_key: str
+        self,
+        *,
+        payment_id: str,
+        amount: int,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
     ) -> PaymentResult:
         _require_amount(amount)
-        raw = self._call(self._client.payment.capture, payment_id, amount, {"currency": "INR"})
+        raw = self._call(
+            self._client.payment.capture,
+            payment_id,
+            amount,
+            {"currency": "INR", "notes": _notes(idempotency_key, notes)},
+        )
         return _payment_from(raw)
 
     def fetch_payment(self, payment_id: str) -> PaymentResult:
         return _payment_from(self._call(self._client.payment.fetch, payment_id))
 
-    def create_refund(self, *, payment_id: str, amount: int, idempotency_key: str) -> RefundResult:
+    def create_refund(
+        self,
+        *,
+        payment_id: str,
+        amount: int,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
+    ) -> RefundResult:
         _require_amount(amount)
         raw = self._call(
             self._client.payment.refund,
@@ -133,7 +156,7 @@ class RazorpayRail:
             {
                 "amount": amount,
                 "speed": "normal",
-                "notes": {"paynaka_idempotency_key": idempotency_key},
+                "notes": _notes(idempotency_key, notes),
             },
         )
         return RefundResult(
@@ -193,6 +216,30 @@ def _scrub(message: str) -> str:
         message,
     )
     return message[:500]
+
+
+#: Razorpay accepts at most 15 note keys, and values are strings with a length limit.
+#: Exceeding either is a 400 on a money call, so the ceiling is enforced here rather than
+#: discovered in production.
+_MAX_NOTES = 15
+_MAX_NOTE_VALUE = 256
+
+
+def _notes(idempotency_key: str, extra: dict[str, str] | None) -> dict[str, str]:
+    """Merge PayNaka's own notes with the caller's, bounded.
+
+    The idempotency key always survives -- it is what reconciliation joins on -- and
+    anything the caller adds is truncated rather than allowed to fail the call. A note is
+    metadata; losing a character of it must never be the reason a refund does not happen.
+    """
+    merged: dict[str, str] = {"paynaka_idempotency_key": idempotency_key[:_MAX_NOTE_VALUE]}
+    for key, value in (extra or {}).items():
+        if len(merged) >= _MAX_NOTES:
+            break
+        if key == "paynaka_idempotency_key":
+            continue
+        merged[str(key)[:_MAX_NOTE_VALUE]] = str(value)[:_MAX_NOTE_VALUE]
+    return merged
 
 
 def _require_amount(amount: int) -> None:

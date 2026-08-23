@@ -236,13 +236,21 @@ def check_structure(request: MoneyRequest, mandate: IntentMandate) -> GateDecisi
 def check_revoked(
     request: MoneyRequest, mandate: IntentMandate, state: SqliteState
 ) -> GateDecision | None:
-    """The kill switch, checked before anything else expensive."""
-    if state.is_revoked(mandate.mandate_id, mandate.session_id):
+    """The kill switch, checked before anything else expensive.
+
+    All three scopes, and the subject is not decoration: an attacker who can burn a
+    session's budget can start another one, so the circuit breaker withdraws authority
+    from the *shopper* once enough sessions have gone the same way. Revoking a scope
+    nothing checks is a revocation that does nothing, which is what the first version of
+    this did and what the rotating-sessions test found.
+    """
+    if state.is_revoked(mandate.mandate_id, mandate.session_id, mandate.subject):
         return _deny(
             "revoked",
             "authority has been revoked",
             mandate_id=mandate.mandate_id,
             session_id=mandate.session_id,
+            subject=mandate.subject,
         )
     return None
 
@@ -339,6 +347,43 @@ def check_quantities(request: MoneyRequest, mandate: IntentMandate) -> GateDecis
                 sku=item.sku,
                 requested=item.qty,
                 authorised=mandate.max_qty_per_sku,
+            )
+    return None
+
+
+def check_reference_price(request: MoneyRequest, mandate: IntentMandate) -> GateDecision | None:
+    """Is each item still the price the shopper was shown?
+
+    ``check_total`` asks whether the basket fits the budget. This asks a different
+    question that nobody was asking: is the *thing* still the thing that was agreed to?
+
+    They come apart whenever the budget is looser than the price, which is nearly always,
+    because shoppers say round numbers. "Atta, under two thousand" against a bag listed at
+    Rs 1,999 leaves one rupee of slack; "under two and a half thousand" leaves five
+    hundred and one, and a merchant who reprices inside that slack has taken money the
+    shopper never agreed to while staying comfortably authorised.
+
+    A reference price closes it, and only where one was captured -- an open-ended budget
+    with no reference is a shopper who genuinely said "anything under X", and inventing a
+    ceiling for them would be inventing an intent they did not express.
+    """
+    if not mandate.reference_prices:
+        return None
+
+    for item in request.items:
+        ceiling = mandate.price_ceiling_for(item.sku)
+        if ceiling is None:
+            continue
+        if item.unit_paise > ceiling:
+            return _deny(
+                "envelope.price_moved",
+                f"{item.sku} is {item.unit_paise} paise per unit; it was "
+                f"{mandate.reference_for(item.sku)} when this was authorised",
+                sku=item.sku,
+                reference=mandate.reference_for(item.sku),
+                ceiling=ceiling,
+                presented=item.unit_paise,
+                tolerance_bps=mandate.price_tolerance_bps,
             )
     return None
 
@@ -567,6 +612,7 @@ def evaluate(
         lambda: check_action_authorised(request, mandate, policy),
         lambda: check_currency(request, mandate),
         lambda: check_items_subset(request, mandate),
+        lambda: check_reference_price(request, mandate),
         lambda: check_total(request, mandate, policy),
         lambda: check_destination(request, mandate),
         lambda: check_refund_bounds(request, mandate, state, policy),

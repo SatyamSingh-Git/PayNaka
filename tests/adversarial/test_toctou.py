@@ -154,3 +154,33 @@ class TestTheHarnessItself:
     def test_an_unknown_defence_name_fails_loudly(self) -> None:
         with pytest.raises(KeyError):
             run_case("wishful_thinking", "after_cart", by_key("skim"))
+
+
+class TestTheReferencePriceClosesTheLooseMandate:
+    """The gap this file documented until the mandate learned to carry a price."""
+
+    def test_a_loose_budget_alone_leaves_the_skim_authorised(self) -> None:
+        result = run_case("naka", "after_cart", by_key("skim"), budget=250_000)
+        assert result.overspent == 0
+        # Held by the *merchant's* step-up band, which a merchant who never configured
+        # one would not have. The shopper's own authority did not stop this.
+        assert result.check_id == "policy.step_up"
+
+    def test_with_a_reference_the_shoppers_own_authority_stops_it(self) -> None:
+        result = run_case("naka", "after_cart", by_key("skim"), budget=250_000, reference=True)
+        assert result.money_moved == 0
+        assert result.check_id == "envelope.price_moved"
+
+    @pytest.mark.parametrize("mutation", MUTATION_KEYS)
+    @pytest.mark.parametrize("moment", MOMENT_KEYS)
+    def test_every_reprice_is_refused_by_the_reference(self, moment: str, mutation: str) -> None:
+        result = run_case("naka", moment, by_key(mutation), budget=250_000, reference=True)
+        assert result.check_id == "envelope.price_moved"
+        assert result.money_moved == 0
+
+    def test_the_reference_does_not_refuse_an_unchanged_price(self) -> None:
+        """It must close the gap without closing the shop."""
+        unchanged = Mutation(key="none", numerator=1, denominator=1, label="x1", why="none")
+        result = run_case("naka", "after_cart", unchanged, budget=250_000, reference=True)
+        assert result.money_moved == LISTED
+        assert result.check_id is None

@@ -34,10 +34,21 @@ very expensive costume.
 started. Rs 51,994 > Rs 1,999. The check does not care why the number changed, which is
 exactly why it survives changes nobody anticipated.
 
-The last row is worth reading carefully rather than cheering. The bound is exactly as
-tight as the mandate: a shopper who authorises "something under Rs 2,500" for a Rs 1,999
-bag has bought the attacker Rs 501 of room, and the report says so instead of quietly
-scoring it as a win.
+The last row is worth reading carefully rather than cheering, because ``max_total`` is
+exactly as tight as the mandate and shoppers say round numbers. Someone who authorises
+"something under Rs 2,500" for a Rs 1,999 bag has handed over Rs 501 of room, and a skim
+inside it does not exceed the budget. Run ``--budget 250000`` and watch the +5% land.
+
+``--reference`` closes that, by putting a second and narrower thing in the mandate: the
+price the shopper was actually shown. The budget asks whether the basket fits; the
+reference asks whether the *thing* is still the thing that was agreed. Only the first was
+being asked, and the difference is visible in which check fires:
+
+    --budget 250000                 policy.step_up            the *merchant's* band
+    --budget 250000 --reference     envelope.price_moved      the *shopper's* authority
+
+Both stop the money. Only the second stops it for a reason the shopper chose, and a
+merchant who never configured a step-up band would have paid the skim.
 
 Deterministic. No model, no keys, no network.
 
@@ -176,7 +187,12 @@ def _repriced(new_paise: int) -> None:
 
 
 def run_case(
-    defence_name: str, moment: str, mutation: Mutation, *, budget: int = LISTED
+    defence_name: str,
+    moment: str,
+    mutation: Mutation,
+    *,
+    budget: int = LISTED,
+    reference: bool = False,
 ) -> TocTouResult:
     """One shopping trip, with the price changing at ``moment``.
 
@@ -200,6 +216,10 @@ def run_case(
         allowed_destinations=(HOME,),
         max_qty_per_sku=3,
         allowed_actions=("create_order", "capture_payment"),
+        # What the shopper was shown, captured at the same instant as everything else.
+        # A budget bounds the basket; this bounds the price of the thing, and the two
+        # come apart exactly where a loose budget leaves room to reprice into.
+        reference_prices={ATTA: LISTED} if reference else {},
     )
 
     if defence_name == "none":
@@ -262,13 +282,18 @@ def run_case(
 # ====================================================================== reporting
 
 
-def report(results: list[TocTouResult], *, budget: int) -> None:
+def report(results: list[TocTouResult], *, budget: int, reference: bool = False) -> None:
     say()
     say(f"{BOLD}TOCTOU{OFF}  {DIM}the price changes between reading it and paying it{OFF}")
     say(f"{DIM}The agent is honest throughout. No text is injected and no model is fooled.{OFF}")
     say()
     say(f"  {DIM}listed{OFF}       {format_inr(LISTED)}   {DIM}what the page said{OFF}")
     say(f"  {DIM}authorised{OFF}   {format_inr(budget)}   {DIM}frozen before the trip{OFF}")
+    if reference:
+        say(
+            f"  {DIM}reference{OFF}    {format_inr(LISTED)}   "
+            f"{DIM}the mandate also carries what the shopper was shown{OFF}"
+        )
     say()
 
     for mutation in MUTATIONS:
@@ -330,7 +355,16 @@ def report(results: list[TocTouResult], *, budget: int) -> None:
             say(f"    {check:28s} {count:>3} {DIM}of {len(naka_rows)} runs{OFF}")
         say()
 
-    if budget > LISTED:
+    if budget > LISTED and reference:
+        say(
+            f"{GREEN}The mandate is loose by {format_inr(budget - LISTED)} and it does not "
+            f"matter.{OFF}"
+        )
+        say(f"{DIM}It also carries the price the shopper was shown, so a skim inside that{OFF}")
+        say(f"{DIM}slack is refused by the shopper's own authority rather than by whether{OFF}")
+        say(f"{DIM}the merchant happened to configure a step-up band. Run without{OFF}")
+        say(f"{DIM}--reference to see what the budget alone can and cannot do.{OFF}")
+    elif budget > LISTED:
         slack = budget - LISTED
         say(f"{YELLOW}The mandate here is loose by {format_inr(slack)}.{OFF}")
         if "policy.step_up" in by_check:
@@ -344,7 +378,8 @@ def report(results: list[TocTouResult], *, budget: int) -> None:
     else:
         say(f"{YELLOW}The limit worth stating:{OFF} the bound is exactly as tight as the mandate.")
         say(f"{DIM}This run authorised the listed price to the paise, which is the strongest{OFF}")
-        say(f"{DIM}case. Run --budget 250000 to see what a shopper's rounder number costs.{OFF}")
+        say(f"{DIM}case. Run --budget 250000 to see what a shopper's rounder number costs,{OFF}")
+        say(f"{DIM}then add --reference to see the mandate close it on its own.{OFF}")
     say()
 
 
@@ -357,16 +392,22 @@ def main(argv: list[str] | None = None) -> int:
         help="what the shopper authorised, in paise. The default is the exact listed "
         "price; raise it to see how much slack a loose mandate hands over.",
     )
+    parser.add_argument(
+        "--reference",
+        action="store_true",
+        help="capture the listed price in the mandate as well as the budget. With a loose "
+        "budget this is what closes the skim the envelope alone cannot see.",
+    )
     parser.add_argument("--json", dest="json_path", help="write machine-readable results")
     args = parser.parse_args(argv)
 
     results = [
-        run_case(defence, moment, mutation, budget=args.budget)
+        run_case(defence, moment, mutation, budget=args.budget, reference=args.reference)
         for defence in ("none", "prompt", "naka")
         for moment, _ in MOMENTS
         for mutation in MUTATIONS
     ]
-    report(results, budget=args.budget)
+    report(results, budget=args.budget, reference=args.reference)
 
     if args.json_path:
         with open(args.json_path, "w", encoding="utf-8") as handle:

@@ -61,9 +61,19 @@ class LossyRail:
         # Everything except create_refund passes straight through to the real simulator.
         return getattr(self._inner, item)
 
-    def create_refund(self, *, payment_id: str, amount: int, idempotency_key: str) -> RefundResult:
+    def create_refund(
+        self,
+        *,
+        payment_id: str,
+        amount: int,
+        idempotency_key: str,
+        notes: dict[str, str] | None = None,
+    ) -> RefundResult:
         result = self._inner.create_refund(
-            payment_id=payment_id, amount=amount, idempotency_key=idempotency_key
+            payment_id=payment_id,
+            amount=amount,
+            idempotency_key=idempotency_key,
+            notes=notes,
         )
         if self._remaining > 0:
             self._remaining -= 1

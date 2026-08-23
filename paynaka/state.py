@@ -80,6 +80,17 @@ CREATE TABLE IF NOT EXISTS returns (
     at         INTEGER NOT NULL
 );
 
+-- Denials, counted per scope per IST day. The gate refusing a request costs PayNaka
+-- microseconds and costs the *agent operator* a full model turn, so an attacker who can
+-- keep an agent retrying against a wall burns somebody else's money without moving a
+-- rupee. This counter is what turns that from unbounded into bounded.
+CREATE TABLE IF NOT EXISTS denials (
+    scope   TEXT NOT NULL,
+    ist_day TEXT NOT NULL,
+    count   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope, ist_day)
+);
+
 CREATE TABLE IF NOT EXISTS retries (
     scope   TEXT NOT NULL,
     ist_day TEXT NOT NULL,
@@ -455,6 +466,43 @@ class SqliteState:
                 (scope, self._ist_day(epoch)),
             ).fetchone()
         return int(row[0]) if row else 0
+
+    # ---------------------------------------------------------------- denials
+    def bump_denial(self, scope: str, *, clock: Clock | None = None) -> int:
+        """Count one refusal against ``scope`` and return the running total for today.
+
+        An upsert rather than read-then-write, for the same reason as :meth:`bump_retry`:
+        a loop hammering the gate is exactly the situation in which two increments race,
+        and a breaker that undercounts under load is a breaker that does not trip when it
+        matters most.
+        """
+        if not scope:
+            raise StateError("a denial must be counted against a scope")
+        now = self._now(clock)
+        day = self._ist_day(now)
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO denials (scope, ist_day, count) VALUES (?, ?, 1) "
+                "ON CONFLICT (scope, ist_day) DO UPDATE SET count = count + 1",
+                (scope, day),
+            )
+            row = self._conn.execute(
+                "SELECT count FROM denials WHERE scope = ? AND ist_day = ?", (scope, day)
+            ).fetchone()
+        return int(row[0])
+
+    def denial_count(self, scope: str, epoch: int) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT count FROM denials WHERE scope = ? AND ist_day = ?",
+                (scope, self._ist_day(epoch)),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def clear_denials(self, scope: str) -> None:
+        """Forget a scope's refusals. The other half of ``unrevoke``, for an operator."""
+        with self._lock:
+            self._conn.execute("DELETE FROM denials WHERE scope = ?", (scope,))
 
     # ---------------------------------------------------------------- revocation
     def revoke(self, scope: str, *, clock: Clock | None = None) -> None:

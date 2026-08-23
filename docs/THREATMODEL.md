@@ -20,7 +20,8 @@ Assume they cannot:
 
 - forge an Ed25519 signature over bytes they did not choose;
 - read or write the process memory of the gate;
-- rewrite the audit database *and* the externally published head hash.
+- rewrite the audit database *and* the notary's key *and* the payment gateway's own
+  records of the payments the merchant made.
 
 ---
 
@@ -110,19 +111,102 @@ That is the argument for pre-authorisation in one line: **diligence after an irr
 action is a post-mortem.** The only check that helps is the one that happens before the
 money moves, and a frozen mandate is that check whether or not anybody remembers to look.
 
-**And the limit, stated rather than buried: the bound is exactly as tight as the mandate.**
-Those runs authorise the listed price to the paise, which is the strongest case. A shopper
-who says "something under ₹2,500" for a ₹1,999 bag has handed over ₹501 of room, and a +5%
-skim inside that room is *authorised* — the envelope will not stop it, and should not. In
-the bundled policy the merchant's own `step_up_above` band catches it instead, which is a
-second and separate mechanism; a merchant who never configured one would pay the skim.
-`make toctou` prints which check actually fired rather than crediting the envelope for
-both.
+**The budget bound is exactly as tight as the mandate**, and shoppers say round numbers.
+Someone who says "something under ₹2,500" for a ₹1,999 bag has handed over ₹501 of room, and
+a +5% skim inside that room does not exceed the budget. `max_total` will not stop it and
+should not — it was authorised.
 
-### Undetectable audit tampering
+So the mandate now carries a second, narrower thing: **what the shopper was shown.**
+
+```yaml
+reference_prices:   { ATTA-5KG: 199900 }   # the page said ₹1,999
+price_tolerance_bps: 100                   # 1% of slack for honest repricing
+```
+
+`check_reference_price` compares each line item against it. The two bounds answer
+different questions and only the first was being asked:
+
+| | asks | catches the skim inside a loose budget |
+|---|---|---|
+| `max_total` | does the basket fit the budget? | no |
+| `reference_prices` | is the *thing* still the thing that was agreed? | **yes** |
+
+Measured on the same ₹2,500-budget case that used to slip through:
+
+| mandate | verdict | held by |
+|---|---|---|
+| budget only | STEP_UP | `policy.step_up` — the *merchant's* band, which a merchant who never configured one would not have |
+| budget + reference | **DENY** | `envelope.price_moved` — the *shopper's* own authority |
+
+Both stop the money. Only the second stops it for a reason the shopper chose.
+
+Empty `reference_prices` disables the check entirely, which is the honest default: a
+shopper who genuinely said "anything under ₹2,500" was not shown a price, and inventing a
+ceiling for them would be inventing an intent they never expressed.
+
+### Audit tampering, including the two kinds the chain cannot see by itself
 
 Editing a payload, deleting a record, or reordering the chain all break verification, and
 `verify()` names the exact sequence number and the kind of break.
+
+Two attacks defeat that, and both defeat it completely, because `verify()` checks the
+chain against *itself*:
+
+- **A wholesale rewrite.** Recompute the table from scratch and it verifies perfectly.
+- **Trailing truncation.** Lop records off the end and what remains is shorter, internally
+  consistent, and silent about what is missing.
+
+The fix is not cryptography, it is **witnesses**: one signed sentence saying *at time T
+this chain had N records and its tip was H*. A rewritten chain has a different tip at
+every length, and a truncated one cannot reach N at all. `paynaka/anchor.py` is honest
+about there being three tiers rather than pretending to one solution:
+
+| Tier | Where the witness lives | What it survives |
+|---|---|---|
+| 1 | a separate append-only log | a careless attacker, and accidental corruption |
+| 2 | signed by a **notary key the gate does not hold** | an attacker who owns the database but not another machine's key |
+| 3 | **the payment rail** — the head rides in the `notes` of calls PayNaka was already making | an attacker who owns *every local file including the notary key* |
+
+Tier 3 is the one worth arguing about. Razorpay stores the notes and hands them back on
+read, so every money movement is a witness to the local chain at the moment it happened,
+and the merchant cannot go back and edit Razorpay's record of a payment they made. It
+costs nothing, because the calls were happening anyway.
+
+Its limitation, stated: it witnesses only at the moments money moved. A stretch of the
+chain containing nothing but denials is covered by tiers 1 and 2 alone. That is a real
+gap and it is a much narrower one than it replaces.
+
+Still not defended: an attacker who controls the gate, the notary **and** the merchant's
+Razorpay account at once has already won, and no arrangement of hashes changes that.
+
+### Denial of wallet, bounded
+
+A refusal costs PayNaka microseconds and costs whoever is driving the agent a full model
+turn. That asymmetry runs the wrong way: an attacker who keeps an agent looping against a
+wall spends nothing and drains someone else's budget, and `max_turns` bounds one run
+rather than an adversary who can start many.
+
+The circuit breaker bounds it. After `denials_per_session` refusals in an IST day the
+session's authority is withdrawn, which turns a retryable "no" into a terminal one — and a
+terminal answer is the only kind a looping agent cannot argue with. A second, wider bound
+counts per *subject*, because an attacker who can burn one session can start another.
+
+```yaml
+circuit_breaker:
+  denials_per_session: 12
+  denials_per_subject: 40
+```
+
+Measured: 200 attempts against a breaker set to 5 cost the attacker **5** substantive
+checks and 195 revocations.
+
+Approvals are not counted. Replays are not counted — a duplicate webhook is not an attack.
+A STEP_UP is not counted — waiting for a human is not being refused.
+
+The awkward half is true too, and is tested rather than hidden: a breaker on a money path
+locks out the legitimate session along with the attacker. That is what fail-closed means,
+it is the defensible direction, and an operator clears it with `unrevoke()` and
+`clear_denials()`.
 
 ---
 
@@ -134,31 +218,43 @@ PayNaka does not stop an agent from being persuaded. It stops a persuaded agent 
 moving money outside its mandate. Those are different claims and the second is the only
 one made here.
 
-### Bad-but-authorised choices
+This is not a gap waiting to be closed. It is the shape of the argument: nobody can
+promise a model will not be talked into something, and a system whose safety depended on
+that promise would be resting on the one part of the stack that offers no guarantees.
 
-An agent steered into buying a *worse* product **inside** the budget, from a *worse*
-seller, at a *worse* price, is a real loss. Every check here is about authority, and that
-purchase is authorised. HAAT does not score it, and it should not be read as safe.
+### Bad-but-authorised choices — the half that is not a number
 
-### Denial of wallet
+The *price* half is now checked: `reference_prices` above catches a merchant repricing
+inside a loose budget.
 
-An adversary who induces an agent into a loop against a denying gate burns tokens without
-moving a rupee. `max_turns` bounds one run; nothing bounds an attacker who can start many.
+What remains is the half that is not a number. An agent steered into a *worse seller*, or
+a worse product at an entirely honest price, is a real loss and is fully authorised. Every
+check here is about authority, and that purchase has it. HAAT does not score it and it
+should not be read as safe.
 
-### A wholesale audit rewrite
+Making it checkable would mean the mandate carrying a judgment, and a judgment expressed
+as a threshold is a heuristic in the money path — the exact thing this project refuses to
+put there.
 
-The chain proves internal *consistency*, not authenticity. An attacker with total write
-access who also resets `sqlite_sequence` can recompute a valid chain from scratch. Only a
-head hash published somewhere outside our control catches that, which is why `head()`
-exists. A test is named for this limitation so nobody later claims more.
+### Denial of wallet, past the breaker
 
-A partial rewrite *is* caught: `AUTOINCREMENT` never reuses sequence numbers, so a naive
-delete-and-replay produces a chain starting at seq 6 and the gap gives it away.
+The circuit breaker bounds a loop, and bounding is not preventing: the turns spent
+before it trips are gone. An attacker who is content to burn a few turns per session, per
+day, indefinitely, still costs the operator money without moving a rupee.
 
-### Trailing truncation
+What the breaker buys is that the cost is now a number an operator chose rather than a
+number an attacker chose.
 
-Lopping records off the end leaves a shorter but internally consistent chain. Same
-defence, same limitation: compare against a published head.
+### An attacker who owns everything at once
+
+The three witness tiers each raise the bar and none of them is a wall. An adversary who
+holds the gate process, the notary key **and** the merchant's Razorpay account can rewrite
+the chain and every witness of it. That is not a hash-chain problem and no arrangement of
+hashes solves it.
+
+A *partial* rewrite is still caught by the chain alone: `AUTOINCREMENT` never reuses
+sequence numbers, so a naive delete-and-replay produces a chain starting at seq 6 and the
+gap gives it away.
 
 ### The sentinel classifier
 

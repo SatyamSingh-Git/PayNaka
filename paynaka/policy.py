@@ -20,7 +20,13 @@ import yaml
 from paynaka.clock import TimeWindow, parse_window
 from paynaka.money import MAX_PAISE
 
-__all__ = ["ActionPolicy", "Policy", "PolicyError", "RegulatoryPolicy"]
+__all__ = [
+    "ActionPolicy",
+    "CircuitBreaker",
+    "Policy",
+    "PolicyError",
+    "RegulatoryPolicy",
+]
 
 POLICY_VERSION: Final[int] = 1
 
@@ -91,6 +97,42 @@ class RegulatoryPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class CircuitBreaker:
+    """How many refusals a session gets before its authority is withdrawn.
+
+    A gate that refuses is free for the merchant and expensive for whoever is driving the
+    agent: every denial costs a model turn. An attacker who can keep an agent looping
+    against a wall therefore burns the operator's budget without moving a rupee, and
+    ``max_turns`` bounds one run rather than an attacker who can start many.
+
+    This bounds it. After ``denials_per_session`` refusals in an IST day the session is
+    revoked, which turns a retryable "no" into a terminal one -- and a terminal answer is
+    the only kind a looping agent cannot argue with.
+
+    It does not make the attack free to defend: the turns *before* the breaker trips are
+    still spent. The claim is bounded, not prevented, and the bound is this number.
+    """
+
+    enabled: bool = True
+    denials_per_session: int = 12
+    denials_per_subject: int = 40
+
+    def __post_init__(self) -> None:
+        for name in ("denials_per_session", "denials_per_subject"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise PolicyError(f"{name} must be int")
+            if value < 1:
+                raise PolicyError(f"{name} must be at least 1")
+        if self.denials_per_subject < self.denials_per_session:
+            raise PolicyError(
+                f"denials_per_subject ({self.denials_per_subject}) is below "
+                f"denials_per_session ({self.denials_per_session}); the wider bound would "
+                "trip first and the narrower one would never be reached"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class Policy:
     """A whole policy file, parsed and validated."""
 
@@ -103,6 +145,7 @@ class Policy:
     step_up_timeout_seconds: int = 300
     on_step_up_timeout: str = "DENY"
     kill_switch: bool = False
+    circuit_breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
 
     def __post_init__(self) -> None:
         if self.version != POLICY_VERSION:
@@ -156,6 +199,7 @@ class Policy:
                 "regulatory",
                 "escalation",
                 "kill_switch",
+                "circuit_breaker",
             },
             "policy",
         )
@@ -168,6 +212,25 @@ class Policy:
 
         kill = _as_mapping(raw.get("kill_switch", {}), "kill_switch")
         _reject_unknown(kill, {"revoke_all_mandates"}, "kill_switch")
+
+        breaker_raw = _as_mapping(raw.get("circuit_breaker", {}), "circuit_breaker")
+        _reject_unknown(
+            breaker_raw,
+            {"enabled", "denials_per_session", "denials_per_subject"},
+            "circuit_breaker",
+        )
+        fallback = CircuitBreaker()
+        breaker = CircuitBreaker(
+            enabled=_as_bool(breaker_raw.get("enabled", fallback.enabled), "enabled"),
+            denials_per_session=_as_int(
+                breaker_raw.get("denials_per_session", fallback.denials_per_session),
+                "denials_per_session",
+            ),
+            denials_per_subject=_as_int(
+                breaker_raw.get("denials_per_subject", fallback.denials_per_subject),
+                "denials_per_subject",
+            ),
+        )
 
         return cls(
             merchant=str(raw.get("merchant", "")),
@@ -183,6 +246,7 @@ class Policy:
             ),
             on_step_up_timeout=str(escalation.get("on_timeout", "DENY")),
             kill_switch=_as_bool(kill.get("revoke_all_mandates", False), "revoke_all_mandates"),
+            circuit_breaker=breaker,
         )
 
 
