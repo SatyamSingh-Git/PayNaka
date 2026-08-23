@@ -43,6 +43,7 @@ __all__ = [
     "Verdict",
     "evaluate",
     "request_hash",
+    "reservation_key",
 ]
 
 #: Actions that move money out irreversibly. Used only to decide how loudly to log; the
@@ -556,7 +557,13 @@ def evaluate(
 
     step_up = check_step_up(request, policy)
     if step_up is not None:
+        # No balance is claimed for a request that still needs a human. Holding it would
+        # block other refunds for as long as the approval sits in somebody's inbox.
         return finish(step_up)
+
+    reservation = _reserve_refund(request, state, clock)
+    if reservation is not None:
+        return finish(reservation)
 
     return finish(
         GateDecision(
@@ -569,6 +576,45 @@ def evaluate(
                 "authorised": mandate.max_total,
             },
         )
+    )
+
+
+def reservation_key(request: MoneyRequest) -> str:
+    """The key a refund's balance claim is held under.
+
+    Derived, not passed, so the gate and the engine cannot disagree about it. Prefers the
+    idempotency key -- which names the business event -- and falls back to the request id
+    when policy does not require one, since something must be unique per attempt.
+    """
+    return request.idempotency_key or f"req:{request.request_id}"
+
+
+def _reserve_refund(request: MoneyRequest, state: SqliteState, clock: Clock) -> GateDecision | None:
+    """Claim the balance this refund would spend, atomically, before anything moves.
+
+    ``check_refund_bounds`` above already compared the amount against what is refundable,
+    and that check is still worth having for the error message it produces. It is not
+    worth trusting on its own: it reads the balance and the ledger is written later, and
+    two refunds for the same payment arriving together both fit through the gap. Measured
+    on twenty concurrent refunds, the gate approved all twenty and the *gateway* refused
+    sixteen. A bound the payment provider enforces for us is not a bound we enforce.
+
+    This is the authoritative claim. One statement, no window.
+    """
+    if request.action != "create_refund" or not request.payment_id:
+        return None
+
+    key = reservation_key(request)
+    if state.reserve_refund(key, request.payment_id, request.effective_amount, clock=clock):
+        return None
+
+    return _deny(
+        "refund.balance_claimed",
+        "the refundable balance is already claimed by a refund that has not resolved",
+        requested=request.effective_amount,
+        refundable=state.refundable_amount(request.payment_id),
+        held=state.held_amount(request.payment_id),
+        key=key,
     )
 
 

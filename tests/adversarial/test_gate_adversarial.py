@@ -302,7 +302,10 @@ class TestRefundChecks:
             payment_id="pay_1",
         )
         assert decide(first, refund_mandate, state, policy, clock).allowed
-        state.record_refund("pay_1", 60_000)  # the rail settles it
+        # Approving the first refund claimed its balance. Settling that claim is what
+        # writes the ledger entry, so the two can never disagree; writing the ledger
+        # directly here would leave the claim held and double-count the same 600 rupees.
+        state.settle_reservation("k1", 60_000)
 
         second = dataclasses.replace(first, request_id="r2", idempotency_key="k2")
         result = decide(second, refund_mandate, state, policy, clock)

@@ -11,6 +11,13 @@ run given the same seed:
 - deterministic, seeded failures, so "one in twenty payments fails" is reproducible
 - an injectable fault schedule, which is what the chaos harness drives
 
+One distinction is made carefully throughout, because getting it wrong poisons the audit
+chain: **every definitive refusal raises ``RailDeclined``, and only a lost response raises
+``RailError``.** Refusing to refund more than was captured is a decision the gateway made
+and stands by; a timeout is the gateway declining to say. The engine records the first as
+settled and the second as *outcome unknown*, and a rail that files a firm "no" under the
+second teaches reconciliation to chase money that never moved.
+
 The point is that a benchmark of several thousand agent runs must be reproducible and
 must not depend on a sandbox being up, while the demo still runs against the real thing.
 """
@@ -148,7 +155,7 @@ class SimRail:
 
             order = self._orders.get(order_id)
             if order is None:
-                raise RailError(f"no such order: {order_id}")
+                raise RailDeclined(f"no such order: {order_id}")
 
             self._attempts += 1
             if self._faults.timeout_every and self._attempts % self._faults.timeout_every == 0:
@@ -195,11 +202,11 @@ class SimRail:
 
             payment = self._require_payment(payment_id)
             if payment.status == "captured":
-                raise RailError(f"payment {payment_id} is already captured")
+                raise RailDeclined(f"payment {payment_id} is already captured")
             if payment.status != "authorized":
-                raise RailError(f"payment {payment_id} is {payment.status}, not authorized")
+                raise RailDeclined(f"payment {payment_id} is {payment.status}, not authorized")
             if amount > payment.amount:
-                raise RailError(
+                raise RailDeclined(
                     f"capture {amount} exceeds the authorised {payment.amount} on {payment_id}"
                 )
 
@@ -244,14 +251,14 @@ class SimRail:
 
             payment = self._require_payment(payment_id)
             if payment.status != "captured":
-                raise RailError(f"cannot refund {payment_id}: status is {payment.status}")
+                raise RailDeclined(f"cannot refund {payment_id}: status is {payment.status}")
 
             remaining = payment.captured_amount - payment.refunded_amount
             if amount > remaining:
                 # The rail refuses too. PayNaka's gate should already have caught this;
                 # a second, independent refusal here means a gate bug cannot become a
                 # real over-refund even in the demo.
-                raise RailError(
+                raise RailDeclined(
                     f"refund {amount} exceeds the {remaining} still refundable on {payment_id}"
                 )
 
@@ -286,14 +293,14 @@ class SimRail:
     def _require_payment(self, payment_id: str) -> _Payment:
         payment = self._payments.get(payment_id)
         if payment is None:
-            raise RailError(f"no such payment: {payment_id}")
+            raise RailDeclined(f"no such payment: {payment_id}")
         return payment
 
 
 def _require_amount(amount: int) -> None:
     if isinstance(amount, bool) or not isinstance(amount, int):
-        raise RailError(f"amount must be int paise, got {type(amount).__name__}")
+        raise RailDeclined(f"amount must be int paise, got {type(amount).__name__}")
     if amount <= 0:
-        raise RailError("amount must be positive")
+        raise RailDeclined("amount must be positive")
     if amount > MAX_PAISE:
-        raise RailError("amount exceeds the money ceiling")
+        raise RailDeclined("amount exceeds the money ceiling")

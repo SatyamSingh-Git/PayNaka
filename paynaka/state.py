@@ -55,6 +55,26 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE INDEX IF NOT EXISTS ledger_payment ON ledger (payment_id, kind);
 CREATE INDEX IF NOT EXISTS ledger_day ON ledger (ist_day, kind);
 
+-- A claim on part of a payment's refundable balance, taken before the rail is called.
+--
+-- Without this, checking the balance and writing the ledger entry are two statements with
+-- a gap between them, and two concurrent refunds for the same payment both read the full
+-- balance and both proceed. Measured: twenty concurrent refunds on one payment, every one
+-- of them approved, sixteen of them stopped only because the gateway independently
+-- refused. Relying on the gateway to enforce our own bound is not enforcement.
+--
+-- 'held' means claimed and unresolved -- deliberately including the case where the rail
+-- timed out, because the money may have moved and releasing the claim would let a second
+-- refund spend it again.
+CREATE TABLE IF NOT EXISTS reservations (
+    key        TEXT PRIMARY KEY,
+    payment_id TEXT NOT NULL,
+    amount     INTEGER NOT NULL CHECK (amount > 0),
+    state      TEXT NOT NULL CHECK (state IN ('held', 'settled', 'released')),
+    at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reservations_held ON reservations (payment_id, state);
+
 CREATE TABLE IF NOT EXISTS returns (
     payment_id TEXT PRIMARY KEY,
     at         INTEGER NOT NULL
@@ -243,15 +263,143 @@ class SqliteState:
     def refunded_amount(self, payment_id: str) -> int:
         return self._sum_ledger("payment_id = ? AND kind = 'refund'", (payment_id,))
 
+    def held_amount(self, payment_id: str) -> int:
+        """Refundable balance claimed by a refund that has not resolved yet."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) FROM reservations "
+                "WHERE payment_id = ? AND state = 'held'",
+                (payment_id,),
+            ).fetchone()
+        return int(row[0])
+
     def refundable_amount(self, payment_id: str) -> int:
-        """Captured minus already refunded. Never negative -- that would be a ledger bug."""
-        remaining = self.captured_amount(payment_id) - self.refunded_amount(payment_id)
+        """Captured, minus already refunded, minus claimed and unresolved.
+
+        Held amounts are subtracted because a claim that has not resolved might yet
+        become a refund. Counting it as available is how the same rupee gets refunded
+        twice, and the whole reason :meth:`reserve_refund` exists.
+        """
+        remaining = (
+            self.captured_amount(payment_id)
+            - self.refunded_amount(payment_id)
+            - self.held_amount(payment_id)
+        )
         if remaining < 0:  # pragma: no cover - the gate exists to make this unreachable
             raise StateError(
                 f"ledger invariant violated: {payment_id} refunded beyond capture by "
                 f"{-remaining} paise"
             )
         return remaining
+
+    # ---------------------------------------------------------------- reservations
+    def reserve_refund(
+        self, key: str, payment_id: str, amount: int, *, clock: Clock | None = None
+    ) -> bool:
+        """Atomically claim ``amount`` of what remains refundable. ``True`` if claimed.
+
+        One statement, deliberately. The balance is computed *inside* the ``INSERT``, so
+        there is no instant at which two callers can both read the same remaining balance
+        and both decide they fit into it -- the same trick, and for the same reason, as
+        :meth:`consume_nonce`.
+
+        ``INSERT OR IGNORE`` rather than a plain insert so a repeated key is a refusal
+        rather than an exception: the caller's question is "may I proceed", and the two
+        reasons for no do not need different plumbing.
+        """
+        if isinstance(amount, bool) or not isinstance(amount, int):
+            raise StateError(f"reservation must be int paise, got {type(amount).__name__}")
+        if amount <= 0:
+            raise StateError("a reservation must be for a positive amount")
+        if not key or not payment_id:
+            raise StateError("a reservation needs a key and a payment")
+
+        now = self._now(clock)
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT OR IGNORE INTO reservations (key, payment_id, amount, state, at)
+                SELECT ?, ?, ?, 'held', ?
+                WHERE ? <= (
+                    (SELECT COALESCE(SUM(amount), 0) FROM ledger
+                       WHERE payment_id = ? AND kind = 'capture')
+                  - (SELECT COALESCE(SUM(amount), 0) FROM ledger
+                       WHERE payment_id = ? AND kind = 'refund')
+                  - (SELECT COALESCE(SUM(amount), 0) FROM reservations
+                       WHERE payment_id = ? AND state = 'held')
+                )
+                """,
+                (key, payment_id, amount, now, amount, payment_id, payment_id, payment_id),
+            )
+            return cursor.rowcount == 1
+
+    def settle_reservation(self, key: str, confirmed: int, *, clock: Clock | None = None) -> None:
+        """Turn a held claim into a ledger entry for what the rail actually moved.
+
+        ``confirmed`` comes from the rail, never from the request. They differ on a
+        partial refund, and a ledger that records the ask rather than the outcome drifts
+        away from the money by exactly the difference.
+        """
+        if isinstance(confirmed, bool) or not isinstance(confirmed, int):
+            raise StateError(f"settlement must be int paise, got {type(confirmed).__name__}")
+
+        now = self._now(clock)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payment_id, amount, state FROM reservations WHERE key = ?", (key,)
+            ).fetchone()
+            if row is None:
+                raise StateError(f"no reservation to settle under key {key!r}")
+            payment_id, held, state = row[0], int(row[1]), row[2]
+            if state != "held":
+                raise StateError(f"reservation {key!r} is already {state}")
+            if confirmed > held:
+                # Settling above the claim would spend balance nobody reserved, which is
+                # the exact hole the reservation was taken to close.
+                raise StateError(
+                    f"reservation {key!r} held {held} paise; cannot settle {confirmed}"
+                )
+
+            self._conn.execute("UPDATE reservations SET state = 'settled' WHERE key = ?", (key,))
+            if confirmed > 0:
+                self._conn.execute(
+                    "INSERT INTO ledger (payment_id, kind, amount, at, ist_day) "
+                    "VALUES (?, 'refund', ?, ?, ?)",
+                    (payment_id, confirmed, now, self._ist_day(now)),
+                )
+
+    def release_reservation(self, key: str) -> bool:
+        """Give the claim back. Only ever called on a *definitive* refusal.
+
+        A timeout must not release: the rail may have moved the money, and handing the
+        balance back would let a second request spend it a second time. That claim stays
+        held until reconciliation says otherwise, which is the conservative direction.
+        """
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE reservations SET state = 'released' WHERE key = ? AND state = 'held'",
+                (key,),
+            )
+            return cursor.rowcount == 1
+
+    def reservation_state(self, key: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT state FROM reservations WHERE key = ?", (key,)
+            ).fetchone()
+        return str(row[0]) if row else None
+
+    def unresolved_reservations(self) -> list[tuple[str, str, int]]:
+        """Every claim still held: ``(key, payment_id, amount)``.
+
+        The reconciliation queue. A row here means PayNaka asked a rail to move money and
+        never learned whether it did, which is the only honest thing to say about it.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT key, payment_id, amount FROM reservations WHERE state = 'held' ORDER BY at"
+            ).fetchall()
+        return [(str(r[0]), str(r[1]), int(r[2])) for r in rows]
 
     def daily_refund_total(self, epoch: int) -> int:
         return self._sum_ledger("ist_day = ? AND kind = 'refund'", (self._ist_day(epoch),))

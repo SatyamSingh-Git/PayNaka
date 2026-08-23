@@ -99,8 +99,12 @@ bench-sealed: ## held-out families. refuses to run before the freeze tag.
 	$(PY) python -m haat.runner --corpus sealed --defences all
 
 .PHONY: chaos
-chaos: ## duplicate + out-of-order webhook scenarios
+chaos: ## duplicate, reordered and lost webhooks. no model, no keys, no network.
 	$(PY) python -m chaos.runner
+
+.PHONY: chaos-verbose
+chaos-verbose: ## the same, showing every refund delivery and how it was resolved
+	$(PY) python -m chaos.runner --verbose
 
 .PHONY: audit-verify
 audit-verify: ## recompute the hash chain, print first break

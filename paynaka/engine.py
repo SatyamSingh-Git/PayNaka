@@ -29,7 +29,14 @@ from typing import Any
 
 from paynaka.audit import AuditChain
 from paynaka.clock import Clock, SystemClock
-from paynaka.gate import GateDecision, MoneyRequest, Verdict, evaluate, request_hash
+from paynaka.gate import (
+    GateDecision,
+    MoneyRequest,
+    Verdict,
+    evaluate,
+    request_hash,
+    reservation_key,
+)
 from paynaka.mandate import (
     IntentMandate,
     MandateError,
@@ -171,6 +178,9 @@ class PayNaka:
         try:
             result = self._dispatch(request, key)
         except RailDeclined as exc:
+            # Definitive: the rail says it did not and will not. The claim the gate took
+            # on the refundable balance goes back, so the next request can use it.
+            self._release(request)
             self._append("rail.declined", request, str(exc), provenance)
             return ExecutionResult(
                 decision=decision,
@@ -183,6 +193,11 @@ class PayNaka:
         except RailError as exc:
             # Outcome unknown. Deliberately not recorded as a failure: the money may have
             # moved, and the idempotency key is what will settle it on retry.
+            #
+            # The balance claim is deliberately *not* released. Releasing it would let the
+            # next refund spend a balance that may already be gone, and the conservative
+            # direction on a money path is to keep it held until reconciliation resolves
+            # it. ``state.unresolved_reservations()`` is that queue.
             self._append("rail.indeterminate", request, str(exc), provenance)
             return ExecutionResult(
                 decision=decision,
@@ -247,6 +262,11 @@ class PayNaka:
         ledger silently drifts away from reality.
         """
         confirmed = int(getattr(result, "amount", 0))
+        if request.action == "create_refund":
+            # The refund's ledger entry is written by settling the claim the gate took,
+            # so the balance is never released and re-spent between the two.
+            self.state.settle_reservation(reservation_key(request), confirmed, clock=self.clock)
+            return
         if confirmed <= 0:
             return
         if request.action == "capture_payment":
@@ -255,12 +275,11 @@ class PayNaka:
                 confirmed,
                 clock=self.clock,
             )
-        elif request.action == "create_refund":
-            self.state.record_refund(
-                getattr(result, "payment_id", request.payment_id or ""),
-                confirmed,
-                clock=self.clock,
-            )
+
+    def _release(self, request: MoneyRequest) -> None:
+        """Hand a refund's balance claim back. Only on a refusal the rail stands behind."""
+        if request.action == "create_refund":
+            self.state.release_reservation(reservation_key(request))
 
     def _append(
         self, kind: str, request: MoneyRequest, detail: str, provenance: dict[str, Any]
