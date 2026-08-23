@@ -56,7 +56,7 @@ check: lint types test secrets ## everything CI runs
 
 # ------------------------------------------------------------------ run
 .PHONY: dev
-dev: ## merchant :8001 + paynaka :8002 + console :5173
+dev: console-data ## merchant :8001 + paynaka :8002 + console :5173
 	@echo "starting merchant :8001, paynaka :8002, console :5173"
 	@$(PY) uvicorn merchant.app:app --port 8001 --reload & \
 	 $(PY) uvicorn paynaka.app:app  --port 8002 --reload & \
@@ -105,6 +105,10 @@ chaos: ## duplicate, reordered and lost webhooks. no model, no keys, no network.
 .PHONY: chaos-verbose
 chaos-verbose: ## the same, showing every refund delivery and how it was resolved
 	$(PY) python -m chaos.runner --verbose
+
+.PHONY: console-data
+console-data: ## write what the console displays into console/public
+	$(PY) python -m scripts.console_data
 
 .PHONY: sentinel
 sentinel: ## layer-two detector: recall and false positives, side by side

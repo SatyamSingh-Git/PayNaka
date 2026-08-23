@@ -1,0 +1,247 @@
+{
+  "scenarios": [
+    {
+      "key": "duplicate_sequential",
+      "title": "Redelivery, one worker, in order",
+      "hazard": "the gateway delivered refund.requested twice",
+      "why": "At-least-once is the only delivery guarantee a distributed system can honestly make. A lost ACK looks exactly like a lost request, so it sends again.",
+      "naive": {
+        "handler": "naive",
+        "left_the_gateway": 49900,
+        "ledger_says": 49900,
+        "entitled": 49900,
+        "overspent": 0,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [],
+        "silent_drops": 0,
+        "audit_kinds": []
+      },
+      "paynaka": {
+        "handler": "paynaka",
+        "left_the_gateway": 49900,
+        "ledger_says": 49900,
+        "entitled": 49900,
+        "overspent": 0,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [
+          "idempotency.replay"
+        ],
+        "silent_drops": 0,
+        "audit_kinds": [
+          "decision",
+          "executed",
+          "decision",
+          "executed",
+          "decision"
+        ]
+      },
+      "prevented": 0
+    },
+    {
+      "key": "duplicate_concurrent",
+      "title": "Redelivery, two workers, at the same instant",
+      "hazard": "both copies were picked up simultaneously",
+      "why": "The naive handler deduplicates on a set it reads and then writes. Two threads fit between the read and the write, and both of them find the set empty.",
+      "naive": {
+        "handler": "naive",
+        "left_the_gateway": 99800,
+        "ledger_says": 99800,
+        "entitled": 49900,
+        "overspent": 49900,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [],
+        "silent_drops": 0,
+        "audit_kinds": []
+      },
+      "paynaka": {
+        "handler": "paynaka",
+        "left_the_gateway": 49900,
+        "ledger_says": 49900,
+        "entitled": 49900,
+        "overspent": 0,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [
+          "idempotency.replay"
+        ],
+        "silent_drops": 0,
+        "audit_kinds": [
+          "decision",
+          "executed",
+          "decision",
+          "decision",
+          "executed"
+        ]
+      },
+      "prevented": 49900
+    },
+    {
+      "key": "duplicate_after_restart",
+      "title": "Redelivery across a deploy",
+      "hazard": "the process restarted between the two copies",
+      "why": "Gateway retry windows are measured in hours and deploys are not rare. Deduplication that lives in RAM is not deduplication; it is a cache and some luck.",
+      "naive": {
+        "handler": "naive",
+        "left_the_gateway": 99800,
+        "ledger_says": 99800,
+        "entitled": 49900,
+        "overspent": 49900,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [],
+        "silent_drops": 0,
+        "audit_kinds": []
+      },
+      "paynaka": {
+        "handler": "paynaka",
+        "left_the_gateway": 49900,
+        "ledger_says": 49900,
+        "entitled": 49900,
+        "overspent": 0,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [
+          "idempotency.replay"
+        ],
+        "silent_drops": 0,
+        "audit_kinds": [
+          "decision",
+          "executed",
+          "decision",
+          "executed",
+          "decision"
+        ]
+      },
+      "prevented": 49900
+    },
+    {
+      "key": "out_of_order",
+      "title": "The refund arrives before the capture",
+      "hazard": "refund.requested was delivered ahead of payment.captured",
+      "why": "Gateways fan out across workers and do not serialise. Two events emitted in order can arrive in either order, and nobody ever promised otherwise.",
+      "naive": {
+        "handler": "naive",
+        "left_the_gateway": 49900,
+        "ledger_says": 49900,
+        "entitled": 49900,
+        "overspent": 0,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [],
+        "silent_drops": 1,
+        "audit_kinds": []
+      },
+      "paynaka": {
+        "handler": "paynaka",
+        "left_the_gateway": 49900,
+        "ledger_says": 49900,
+        "entitled": 49900,
+        "overspent": 0,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [
+          "refund.exceeds_capture"
+        ],
+        "silent_drops": 0,
+        "audit_kinds": [
+          "decision",
+          "decision",
+          "executed",
+          "decision",
+          "executed"
+        ]
+      },
+      "prevented": 0
+    },
+    {
+      "key": "tampered_replay",
+      "title": "A redelivery whose amount was altered in flight",
+      "hazard": "the same event id came back asking for Rs 1,499 instead of Rs 499",
+      "why": "A real Razorpay webhook is HMAC-signed and a mutated body fails that check first. This asks what is left when it does not: a mis-set secret, a proxy that re-serialises the body, a replay off an internal queue that was never signed. Deduplicating on the event id alone gives no answer, because the id is the one field an attacker has every reason to leave alone.",
+      "naive": {
+        "handler": "naive",
+        "left_the_gateway": 199800,
+        "ledger_says": 199800,
+        "entitled": 49900,
+        "overspent": 149900,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [],
+        "silent_drops": 0,
+        "audit_kinds": []
+      },
+      "paynaka": {
+        "handler": "paynaka",
+        "left_the_gateway": 49900,
+        "ledger_says": 49900,
+        "entitled": 49900,
+        "overspent": 0,
+        "underpaid": 0,
+        "books_disagree": 0,
+        "named_refusals": [
+          "idempotency.key_reuse"
+        ],
+        "silent_drops": 0,
+        "audit_kinds": [
+          "decision",
+          "executed",
+          "decision",
+          "executed",
+          "decision"
+        ]
+      },
+      "prevented": 149900
+    },
+    {
+      "key": "timeout_retry_storm",
+      "title": "The refund succeeded and the response was lost",
+      "hazard": "the gateway timed out after doing the work, three times retried",
+      "why": "A timeout is not a decline. The money may well have moved. Retrying a timeout with a fresh idempotency key is how one refund becomes four, and the key looks correct in the code because it does identify the call -- just not the business event, which is the only thing that matters.",
+      "naive": {
+        "handler": "naive",
+        "left_the_gateway": 199600,
+        "ledger_says": 49900,
+        "entitled": 49900,
+        "overspent": 149700,
+        "underpaid": 0,
+        "books_disagree": 149700,
+        "named_refusals": [],
+        "silent_drops": 3,
+        "audit_kinds": []
+      },
+      "paynaka": {
+        "handler": "paynaka",
+        "left_the_gateway": 49900,
+        "ledger_says": 0,
+        "entitled": 49900,
+        "overspent": 0,
+        "underpaid": 0,
+        "books_disagree": 49900,
+        "named_refusals": [
+          "idempotency.replay",
+          "idempotency.replay",
+          "idempotency.replay"
+        ],
+        "silent_drops": 1,
+        "audit_kinds": [
+          "decision",
+          "executed",
+          "decision",
+          "rail.indeterminate",
+          "decision",
+          "decision",
+          "decision"
+        ]
+      },
+      "prevented": 149700
+    }
+  ],
+  "totals": {
+    "naive_overspent": 399400,
+    "paynaka_overspent": 0,
+    "naive_underpaid": 0
+  }
+}
