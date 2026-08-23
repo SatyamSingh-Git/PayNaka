@@ -102,6 +102,10 @@ bench-sealed: ## held-out families. refuses to run before the freeze tag.
 toctou: ## price changes between reading it and paying it. no model, no keys.
 	$(PY) python -m haat.toctou
 
+.PHONY: toctou-probe
+toctou-probe: ## cents: do real agents notice the price changed? (needs a model key)
+	$(PY) python -m scripts.probe_toctou
+
 .PHONY: chaos
 chaos: ## duplicate, reordered and lost webhooks. no model, no keys, no network.
 	$(PY) python -m chaos.runner
