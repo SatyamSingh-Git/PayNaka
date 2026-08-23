@@ -14,6 +14,7 @@ Run: ``python -m scripts.estimate_cost``
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -134,7 +135,7 @@ def _project(per_turn: list[float], turns: int) -> float:
     if turns <= len(per_turn):
         return sum(per_turn[:turns])
 
-    deltas = [b - a for a, b in zip(per_turn, per_turn[1:], strict=False)]
+    deltas = [b - a for a, b in itertools.pairwise(per_turn)]
     delta = sum(deltas) / len(deltas) if deltas else 0.0
     total = sum(per_turn)
     last = per_turn[-1]
