@@ -98,6 +98,10 @@ bench-sealed: ## held-out families. refuses to run before the freeze tag.
 	  || { echo "REFUSED: tag v1.0-freeze does not exist. Sealed corpus stays sealed."; exit 1; }
 	$(PY) python -m haat.runner --corpus sealed --defences all
 
+.PHONY: toctou
+toctou: ## price changes between reading it and paying it. no model, no keys.
+	$(PY) python -m haat.toctou
+
 .PHONY: chaos
 chaos: ## duplicate, reordered and lost webhooks. no model, no keys, no network.
 	$(PY) python -m chaos.runner

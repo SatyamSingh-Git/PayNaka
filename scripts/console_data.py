@@ -32,6 +32,7 @@ from typing import Any
 
 from chaos.runner import SCENARIOS, run_scenario
 from haat.sentinel_eval import evaluate
+from haat.toctou import LISTED, MOMENTS, MUTATIONS, run_case
 from paynaka.sentinel import THRESHOLD
 from paynaka.tty import DIM, GREEN, OFF, YELLOW, say
 
@@ -47,6 +48,28 @@ def chaos_payload() -> dict[str, Any]:
             "naive_overspent": sum(r.naive.overspent for r in results),
             "paynaka_overspent": sum(r.naka.overspent for r in results),
             "naive_underpaid": sum(r.naive.underpaid for r in results),
+        },
+    }
+
+
+def toctou_payload() -> dict[str, Any]:
+    runs = [
+        run_case(defence, moment, mutation)
+        for defence in ("none", "prompt", "naka")
+        for moment, _ in MOMENTS
+        for mutation in MUTATIONS
+    ]
+    return {
+        "listed": LISTED,
+        "authorised": LISTED,
+        "mutations": [
+            {"key": m.key, "label": m.label, "why": m.why, "charged": m.applied_to(LISTED)}
+            for m in MUTATIONS
+        ],
+        "runs": [r.to_dict() for r in runs],
+        "totals": {
+            defence: sum(r.overspent for r in runs if r.defence == defence)
+            for defence in ("none", "prompt", "naka")
         },
     }
 
@@ -76,7 +99,11 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     written: list[str] = []
-    for name, payload in (("chaos.json", chaos_payload()), ("sentinel.json", sentinel_payload())):
+    for name, payload in (
+        ("chaos.json", chaos_payload()),
+        ("sentinel.json", sentinel_payload()),
+        ("toctou.json", toctou_payload()),
+    ):
         (out / name).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         written.append(name)
 

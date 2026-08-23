@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 
 import pytest
-from scripts.console_data import chaos_payload, sentinel_payload
+from scripts.console_data import chaos_payload, sentinel_payload, toctou_payload
 
 pytestmark = pytest.mark.integration
 
@@ -39,6 +39,11 @@ class TestTheCommittedNumbersAreCurrent:
     def test_sentinel_json_matches_a_fresh_run(self) -> None:
         assert _committed("sentinel.json") == sentinel_payload(), (
             "console/public/sentinel.json is stale. Run `make console-data`."
+        )
+
+    def test_toctou_json_matches_a_fresh_run(self) -> None:
+        assert _committed("toctou.json") == toctou_payload(), (
+            "console/public/toctou.json is stale. Run `make console-data`."
         )
 
 
@@ -91,6 +96,23 @@ class TestTheShapeTheScreenExpects:
                     assert isinstance(value, int) and not isinstance(value, bool), (
                         f"{scenario['key']}.{side}.{key} is {type(value).__name__}"
                     )
+
+
+class TestTheShapeOfTocTou:
+    def test_it_carries_every_field_the_screen_reads(self) -> None:
+        payload = _committed("toctou.json")
+        assert set(payload) >= {"listed", "authorised", "mutations", "runs", "totals"}
+        assert set(payload["totals"]) >= {"none", "prompt", "naka"}
+        for run in payload["runs"]:
+            assert set(run) >= {"defence", "mutation", "overspent", "overpaid_vs_listed"}
+
+    def test_prompt_hardening_loses_exactly_what_no_defence_loses(self) -> None:
+        """The finding, asserted. A gap between these two rows would be news."""
+        totals = _committed("toctou.json")["totals"]
+        assert totals["prompt"] == totals["none"] > 0
+
+    def test_paynaka_loses_nothing(self) -> None:
+        assert _committed("toctou.json")["totals"]["naka"] == 0
 
 
 class TestTheClaimsItMakes:

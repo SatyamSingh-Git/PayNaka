@@ -25,15 +25,16 @@ import {
  *
  * This screen used to fetch a single `/RESULTS.json` that nothing produced, from a
  * directory that did not exist, and render its empty state on every run since it was
- * written. It now shows the three things separately, because they are separate claims
- * with very different evidence behind them, and stacking them into one number would be
- * the easiest way to overstate the project.
+ * written. It now shows four things separately, because they are separate claims with
+ * very different evidence behind them, and stacking them into one number would be the
+ * easiest way to overstate the project.
  *
+ *   TOCTOU     deterministic. The attack no prompt and no smarter model can defend.
  *   Chaos      deterministic, no model, no keys. Runs anywhere. Always present.
  *   Sentinel   a measured detector, reported with its false-positive rate and its margin.
  *   HAAT       needs a model key and real spend. Absent until `make bench` has run.
  *
- * `make console-data` writes all three into console/public.
+ * `make console-data` writes the first three into console/public.
  */
 
 // ------------------------------------------------------------------ chaos
@@ -63,6 +64,29 @@ interface ChaosScenario {
 interface ChaosResults {
   scenarios: ChaosScenario[];
   totals: { naive_overspent: number; paynaka_overspent: number; naive_underpaid: number };
+}
+
+// ------------------------------------------------------------------ toctou
+
+interface TocTouRun {
+  defence: string;
+  moment: string;
+  mutation: string;
+  listed: number;
+  charged_price: number;
+  authorised: number;
+  money_moved: number;
+  overspent: number;
+  overpaid_vs_listed: number;
+  check_id: string | null;
+}
+
+interface TocTouResults {
+  listed: number;
+  authorised: number;
+  mutations: { key: string; label: string; why: string; charged: number }[];
+  runs: TocTouRun[];
+  totals: Record<string, number>;
 }
 
 // ------------------------------------------------------------------ sentinel
@@ -136,18 +160,19 @@ function useJson<T>(path: string): { data: T | null; missing: boolean } {
 }
 
 export function Benchmark(): JSX.Element {
+  const toctou = useJson<TocTouResults>('/toctou.json');
   const chaos = useJson<ChaosResults>('/chaos.json');
   const sentinel = useJson<SentinelResults>('/sentinel.json');
   const bench = useJson<BenchResults>('/bench.json');
 
-  const nothing = chaos.missing && sentinel.missing && bench.missing;
+  const nothing = toctou.missing && chaos.missing && sentinel.missing && bench.missing;
 
   return (
     <Box display="flex" flexDirection="column" gap="spacing.7">
       <Box>
         <Heading size="large">What has been measured</Heading>
         <Text color="surface.text.gray.subtle" marginTop="spacing.2">
-          Three claims, kept apart on purpose. They rest on very different evidence, and an
+          Four claims, kept apart on purpose. They rest on very different evidence, and an
           attack succeeds when money moves beyond what the mandate authorised — never when a
           gate merely returns DENY.
         </Text>
@@ -157,14 +182,129 @@ export function Benchmark(): JSX.Element {
         <EmptyState
           asset={<BarChartIcon size="2xlarge" color="surface.icon.gray.muted" />}
           title="No results on disk"
-          description="Run `make console-data`. It writes chaos.json and sentinel.json with no keys and no network; bench.json appears only after `make bench`, which needs a model key."
+          description="Run `make console-data`. It writes toctou.json, chaos.json and sentinel.json with no keys and no network; bench.json appears only after `make bench`, which needs a model key."
           size="large"
         />
       )}
 
+      {toctou.data && <TocTouSection results={toctou.data} />}
       {chaos.data && <ChaosSection results={chaos.data} />}
       {sentinel.data && <SentinelSection results={sentinel.data} />}
       <HaatSection results={bench.data} missing={bench.missing} />
+    </Box>
+  );
+}
+
+// ==================================================================== toctou
+
+function TocTouSection({ results }: { results: TocTouResults }): JSX.Element {
+  /** Worst case per (mutation, defence): the number a merchant would actually lose. */
+  const worst = (mutation: string, defence: string): TocTouRun =>
+    results.runs
+      .filter((run) => run.mutation === mutation && run.defence === defence)
+      .reduce((a, b) => (b.overspent > a.overspent ? b : a));
+
+  const rows = results.mutations.map((mutation) => ({
+    id: mutation.key,
+    ...mutation,
+    none: worst(mutation.key, 'none'),
+    prompt: worst(mutation.key, 'prompt'),
+    naka: worst(mutation.key, 'naka'),
+  }));
+
+  return (
+    <Box display="flex" flexDirection="column" gap="spacing.4">
+      <Box>
+        <Heading size="medium">Price changed between reading it and paying it</Heading>
+        <Text color="surface.text.gray.subtle" marginTop="spacing.2">
+          The agent is honest throughout — it reads the page, reports {inr(results.listed)}, and
+          orders exactly what the shopper asked for. The merchant reprices before checkout. There
+          is no injected text, no model is fooled, and <b>no amount of model capability helps</b>,
+          because there is no reasoning error to correct.
+        </Text>
+      </Box>
+
+      <Alert
+        color="information"
+        title={`Prompt hardening lost ${inr(results.totals.prompt ?? 0)}; PayNaka lost ${inr(
+          results.totals.naka ?? 0,
+        )}`}
+        description="A prompt defence has nothing to be suspicious of — the poisoned text it looks for does not exist, because this attack never needed any. A frozen mandate ends it in one comparison, and does not care why the number changed."
+        isDismissible={false}
+      />
+
+      <Card padding="spacing.5">
+        <CardBody>
+          <Table data={{ nodes: rows }}>
+            {(tableData) => (
+              <>
+                <TableHeader>
+                  <TableHeaderRow>
+                    <TableHeaderCell>Reprice</TableHeaderCell>
+                    <TableHeaderCell>Charged</TableHeaderCell>
+                    <TableHeaderCell>None</TableHeaderCell>
+                    <TableHeaderCell>Prompt</TableHeaderCell>
+                    <TableHeaderCell>PayNaka</TableHeaderCell>
+                  </TableHeaderRow>
+                </TableHeader>
+                <TableBody>
+                  {tableData.map((row) => (
+                    <TableRow key={row.id} item={row}>
+                      <TableCell>
+                        <Box display="flex" flexDirection="column">
+                          <Text weight="semibold">{row.label}</Text>
+                          <Text size="small" color="surface.text.gray.muted">
+                            {row.why}
+                          </Text>
+                        </Box>
+                      </TableCell>
+                      <TableCell>{inr(row.charged)}</TableCell>
+                      <TableCell>
+                        <Badge color="negative" emphasis="subtle">
+                          {inr(row.none.overspent)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge color="negative" emphasis="subtle">
+                          {inr(row.prompt.overspent)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Box display="flex" flexDirection="column">
+                          <Badge color="positive" emphasis="subtle">
+                            {inr(row.naka.overspent)}
+                          </Badge>
+                          {row.naka.check_id && (
+                            <Text size="small" color="surface.text.gray.muted">
+                              {row.naka.check_id}
+                            </Text>
+                          )}
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </>
+            )}
+          </Table>
+        </CardBody>
+      </Card>
+
+      <Card padding="spacing.5">
+        <CardBody>
+          <Text size="small" color="surface.text.gray.subtle">
+            The limit, stated rather than buried: <b>the bound is exactly as tight as the mandate</b>.
+            These runs authorise the listed price to the paise, which is the strongest case. A
+            shopper who says &ldquo;something under ₹2,500&rdquo; for a ₹1,999 bag has handed over
+            ₹501 of room, and a +5% skim inside that room is <i>authorised</i> — the envelope will
+            not stop it. In the bundled policy the merchant&apos;s own step-up band catches it
+            instead, which is a second and separate mechanism worth distinguishing from the first.
+            Run <code>make toctou</code> with <code>--budget 250000</code> to see it.
+          </Text>
+        </CardBody>
+      </Card>
+
+      <Divider />
     </Box>
   );
 }
