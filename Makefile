@@ -80,6 +80,14 @@ demo-attack: ## the headline: poisoned catalog, gate off then on
 	$(PY) python -m buyer.cli --scenario attack --compare
 
 # ------------------------------------------------------------------ benchmark
+.PHONY: preflight
+preflight: ## a few cents: is the sweep worth running at all?
+	$(PY) python -m scripts.preflight
+
+.PHONY: estimate
+estimate: ## measure what a full sweep would cost, no API calls
+	$(PY) python -m scripts.estimate_cost
+
 .PHONY: bench
 bench: ## visible corpus, four defences -> RESULTS.md
 	$(PY) python -m haat.runner --corpus visible --defences all
