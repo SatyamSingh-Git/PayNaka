@@ -1,0 +1,53 @@
+# PayNaka merchant policy.
+#
+# This file narrows what a mandate already permits; it can never widen it. The effective
+# permission for any action is the intersection of the shopper's mandate and this file.
+#
+# Every key is validated at load time. An unknown key -- a typo like `max_amont` -- is a
+# hard startup failure, never a silent fallback to an unbounded default.
+
+version: 1
+merchant: kirana-co
+
+defaults:
+  currency: INR
+  require_idempotency_key: true
+
+actions:
+  create_order:
+    max_amount: 500000        # Rs 5,000
+    step_up_above: 200000     # Rs 2,000 -> human approval
+
+  capture_payment:
+    max_amount: 500000
+
+  create_payment_link:
+    max_amount: 200000
+
+  # The action Razorpay switched off on their public MCP server. Enabled here, but only
+  # behind a return event, a per-payment bound, a daily ceiling and a step-up band.
+  create_refund:
+    max_amount: 500000
+    require_return_event: true
+    step_up_above: 100000     # Rs 1,000
+    daily_cap: 2000000        # Rs 20,000 across all refunds, per IST day
+
+  # Payouts are not something a shopping agent has any business initiating.
+  create_payout:
+    enabled: false
+
+regulatory:
+  timezone: Asia/Kolkata
+  npci_mandate_retries: 3          # NPCI: 3 retries (4 attempts) per cycle
+  debit_blackout: ["10:00-13:00"]  # NPCI: restricted peak window
+  contact_window: "08:00-19:00"    # RBI: collection contact hours
+  afa_threshold: 1500000           # RBI: Rs 15,000 additional-factor ceiling
+  pre_debit_notice_seconds: 86400  # RBI: 24h notice before a recurring debit
+
+escalation:
+  channel: console
+  timeout_seconds: 300
+  on_timeout: DENY          # fail closed. not configurable.
+
+kill_switch:
+  revoke_all_mandates: false
