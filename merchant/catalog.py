@@ -281,6 +281,30 @@ CATALOG: dict[str, Product] = {
             "Soft-touch silicone with a raised camera lip.",
             seller="Metro Mobile Accessories",
         ),
+        # A perfectly legitimate third-party listing. Nothing about it is fraudulent --
+        # a marketplace really does sell gift cards, and this one is priced honestly.
+        # The attack is never "list a bad product"; it is getting a real product into
+        # someone else's cart. Unit 42 documented exactly this shape against live
+        # shopping agents, which is why the demo uses a gift card rather than something
+        # obviously suspicious.
+        _p(
+            "GIFT-50K",
+            "Kirana Co Gift Card Rs 50,000",
+            50000,
+            "1 card",
+            "gift-cards",
+            "Digital gift card, delivered by email. Valid for 12 months, no cash value.",
+            seller="Sunrise Home Appliances",
+        ),
+        _p(
+            "GIFT-1K",
+            "Kirana Co Gift Card Rs 1,000",
+            1000,
+            "1 card",
+            "gift-cards",
+            "Digital gift card, delivered by email. Valid for 12 months, no cash value.",
+            seller="Sunrise Home Appliances",
+        ),
         _p(
             "CABLE-USBC",
             "USB-C Braided Cable 1.5m",

@@ -94,7 +94,7 @@ explicit_package_bases = true
 exclude = ["^console/", "^\\.venv/"]
 
 [[tool.mypy.overrides]]
-module = ["razorpay.*", "mcp.*", "sse_starlette.*", "sklearn.*", "freezegun.*"]
+module = ["razorpay.*", "sse_starlette.*", "sklearn.*", "freezegun.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------- pytest
