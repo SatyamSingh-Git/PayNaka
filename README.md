@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1154 tests" src="https://img.shields.io/badge/tests-1154-2F6B4F?style=flat-square">
-  <img alt="759 adversarial" src="https://img.shields.io/badge/adversarial-759-2F6B4F?style=flat-square">
+  <img alt="1296 tests" src="https://img.shields.io/badge/tests-1296-2F6B4F?style=flat-square">
+  <img alt="885 adversarial" src="https://img.shields.io/badge/adversarial-885-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -152,10 +152,50 @@ a refund it had no authority to issue.
 **Diligence after an irreversible action is a post-mortem.** The only check that helps is
 the one that happens before the money moves.
 
-The limit, stated rather than buried: **the bound is exactly as tight as the mandate.** Those
-runs authorise the listed price to the paise. A shopper who says "something under ₹2,500"
-for a ₹1,999 bag has handed over ₹501 of room, and a +5% skim inside it is *authorised*.
-`make toctou --budget 250000` prints which check actually fired.
+**`max_total` is exactly as tight as the mandate**, and shoppers say round numbers. Someone
+who says "something under ₹2,500" for a ₹1,999 bag has handed over ₹501 of room, and a +5%
+skim inside it does not exceed the budget.
+
+So the mandate now carries a second, narrower thing: **the price the shopper was shown.**
+The budget asks whether the basket fits; the reference asks whether the *thing* is still
+the thing that was agreed. Only the first was being asked:
+
+```
+make toctou --budget 250000              policy.step_up        the merchant's band
+make toctou --budget 250000 --reference  envelope.price_moved  the shopper's authority
+```
+
+Both stop the money. Only the second stops it for a reason the shopper chose — a merchant
+who never configured a step-up band would have paid the skim. With `--reference`,
+`envelope.price_moved` catches 9 of 9.
+
+## What the threat model used to say it could not do
+
+A security claim without a stated boundary is marketing, so
+[THREATMODEL.md](docs/THREATMODEL.md) has always carried a **What is not defended** list.
+Three of its entries are now closed and a fourth is narrowed:
+
+| Was not defended | Now |
+| --- | --- |
+| **Wholesale audit rewrite** — recompute the table and it verifies perfectly | Witnessed. Three tiers, and tier 3 puts the chain's head in the `notes` of the payment calls PayNaka was already making, so **Razorpay's own records** contradict a rewrite |
+| **Trailing truncation** — a shorter chain is still internally consistent | Same witnesses. A signed "this chain had N records" cannot be satisfied by N−5 |
+| **Denial of wallet** — a loop against a denying gate burns tokens for free | **Bounded.** 200 attempts against a breaker set to 5 cost the attacker 5 substantive checks |
+| **Bad-but-authorised** — a worse price inside the budget | The *price* half is checked by `reference_prices`. The *judgment* half is not, and is now its own entry |
+
+Two entries stay, and neither is a gap waiting to be closed:
+
+**Prompt injection is not solved.** PayNaka does not stop an agent being persuaded; it
+stops a persuaded agent moving money outside its mandate. Nobody can promise a model will
+not be talked into something, and a system resting on that promise would rest on the one
+part of the stack that offers no guarantees.
+
+**A worse seller at an honest price is still authorised.** Making that checkable would mean
+a judgment expressed as a threshold — a heuristic in the money path, which is the one thing
+this project refuses to put there.
+
+Every tier's limit is written down next to it, including the one that ends all of them: an
+attacker holding the gate, the notary key **and** the merchant's Razorpay account has won,
+and no arrangement of hashes changes that.
 
 ## Benchmark: a negative result, reported straight
 
@@ -321,7 +361,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,154 tests, of which **759 are adversarial**. 88% branch coverage on `paynaka/`,
+1,296 tests, of which **885 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?
@@ -347,7 +387,8 @@ Every defect below was found by this suite and is now pinned as a named regressi
 | chaos harness | the refund bound was read-then-write; 20 concurrent refunds, all 20 approved |
 | chaos harness | definitive refusals filed as *outcome unknown*, teaching reconciliation to chase money that never moved |
 | property tests | one line item with `qty=-1` crashed the engine while writing the audit record **for its own denial** — a one-field denial of service |
-| property tests | checks were evaluated eagerly, so a later check that raised overrode an earlier clean, specific denial |
+| property tests | checks were evaluated eagerly, so a later check that raised overrode an earlier clean denial |
+| circuit breaker | revoking a *subject* did nothing, because `check_revoked` only ever looked at the mandate id and the session — a revocation nothing checks is not a revocation |
 
 ```bash
 make check                          # ruff, mypy --strict, pytest, gitleaks

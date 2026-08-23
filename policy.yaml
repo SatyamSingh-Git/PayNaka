@@ -49,5 +49,19 @@ escalation:
   timeout_seconds: 300
   on_timeout: DENY          # fail closed. not configurable.
 
+# Denial of wallet. A refusal costs PayNaka microseconds and costs whoever is driving the
+# agent a full model turn, so an attacker who keeps an agent looping against a wall burns
+# somebody else's budget for free. After this many refusals in an IST day the session's
+# authority is withdrawn, which turns a retryable "no" into a terminal one.
+#
+# The subject bound is wider on purpose: an attacker who can burn one session can start
+# another, and the shopper is the scope that does not reset.
+#
+# This bounds the attack; it does not prevent it. The turns before it trips are spent.
+circuit_breaker:
+  enabled: true
+  denials_per_session: 12
+  denials_per_subject: 40
+
 kill_switch:
   revoke_all_mandates: false
