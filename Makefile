@@ -106,6 +106,14 @@ chaos: ## duplicate, reordered and lost webhooks. no model, no keys, no network.
 chaos-verbose: ## the same, showing every refund delivery and how it was resolved
 	$(PY) python -m chaos.runner --verbose
 
+.PHONY: sentinel
+sentinel: ## layer-two detector: recall and false positives, side by side
+	$(PY) python -m haat.sentinel_eval --per-rule
+
+.PHONY: sentinel-sealed
+sentinel-sealed: ## score the detector on held-out families. refuses before the freeze.
+	$(PY) python -m haat.sentinel_eval --include-sealed --per-rule
+
 .PHONY: audit-verify
 audit-verify: ## recompute the hash chain, print first break
 	$(PY) python -m paynaka.audit --verify

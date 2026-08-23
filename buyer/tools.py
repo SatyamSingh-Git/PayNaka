@@ -20,8 +20,32 @@ from paynaka.engine import ExecutionResult, PayNaka
 from paynaka.gate import LineItem, MoneyRequest
 from paynaka.mandate import IntentMandate, SignedMandate
 from paynaka.money import format_inr
+from paynaka.sentinel import scan
 
 __all__ = ["TOOL_SCHEMAS", "ToolBox", "ToolOutcome"]
+
+
+def _sentinel_flags(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Which fields of a product page the sentinel thinks carry an instruction.
+
+    Advisory. Returned into provenance, never into the agent's view and never into the
+    gate's inputs -- see the note at the call site, and ``paynaka/sentinel.py``.
+    """
+    out: list[dict[str, Any]] = []
+    for name, entry in payload.get("fields", {}).items():
+        result = scan(str(entry.get("value", "")), field_name=name)
+        if result.flagged:
+            out.append({"field": name, "score": result.score, "rules": list(result.rules)})
+    for index, review in enumerate(payload.get("reviews", [])):
+        # A review body arrives wrapped in its trust envelope, same as every other field.
+        body = review.get("body", {})
+        text = body.get("value", "") if isinstance(body, dict) else body
+        result = scan(str(text), field_name=f"reviews[{index}]")
+        if result.flagged:
+            out.append(
+                {"field": f"reviews[{index}]", "score": result.score, "rules": list(result.rules)}
+            )
+    return out
 
 
 def _tool(
@@ -149,6 +173,18 @@ class ToolBox:
             return ToolOutcome({"error": f"no such SKU: {args.get('sku')}"}, is_error=True)
 
         payload = product.to_agent_dict()
+
+        # Layer two, and only ever that. The sentinel reads the same text the agent is
+        # about to read and records what it thinks of it. Nothing here changes what the
+        # agent receives and nothing here reaches the gate -- the flag rides along in
+        # provenance so that an operator replaying a decision can see the field the
+        # payload arrived in, named, rather than a product id and a shrug.
+        #
+        # Deliberately not used to redact. A detector that silently edits what the agent
+        # sees becomes load-bearing the moment somebody trusts it, and this one is 92%
+        # accurate on the families it was built against and unmeasured on the rest.
+        flagged = _sentinel_flags(payload)
+
         # Record what was read and how much of it was untrusted, so a replay can point at
         # the exact field an injection arrived in rather than at the product generally.
         self.last_read.append(
@@ -160,6 +196,7 @@ class ToolBox:
                     if entry["trust"] != str(Trust.MERCHANT)
                 ],
                 "review_count": len(payload["reviews"]),
+                "sentinel_flagged": flagged,
             }
         )
         return ToolOutcome(payload)

@@ -101,10 +101,44 @@ defence, same limitation: compare against a published head.
 
 ### The sentinel classifier
 
-The layer-two detector that flags poisoned fields before the agent reads them is
-**defence in depth and nothing more**. Its metrics are reported separately and it is not
-what provides the guarantee. Merging its numbers into the gate's would be the single
-easiest way to overstate this project.
+`paynaka/sentinel.py` flags poisoned fields before the agent reads them. It is **defence
+in depth and nothing more**. Its metrics are reported separately and it is not what
+provides the guarantee. Merging its numbers into the gate's would be the single easiest
+way to overstate this project.
+
+Three properties keep it in its place, and all three are tested:
+
+- **`gate.py` does not import it.** The money decision never consults a heuristic.
+- **It returns evidence, not a verdict.** `scan()` has no `allow` and no `verdict`. The
+  flag rides along in provenance so an operator can see which field carried the payload;
+  it does not redact, and it does not block.
+- **It contains no model.** A rule-based detector can be argued with. `directive_syntax`
+  matched `[SYSTEM:` at offset 34 is actionable; "the classifier scored 0.83" is not.
+
+Measured on the six **visible** attack families and 100 benign fields — the bundled
+catalogue plus a hard-negative corpus of recipes, capitalised reviews, quoted error
+messages, Hindi and Tamil text, and legitimate SKU and currency mentions:
+
+| | |
+|---|---|
+| recall | **92.1%** (232 / 252 payloads) |
+| false positives | **0.0%** (0 / 100 benign fields) |
+| margin | **5 points** — the closest honest text scored 45 of 50 |
+
+Read the margin, not just the zero. A 0% false-positive rate whose nearest miss sits one
+signal below the line is one rule change away from a bad afternoon, and the number is
+printed for exactly that reason. The near-miss is a seller apologising for a broken mail
+template containing `{{customer_name}}`.
+
+**Recall against the sealed families is unmeasured, deliberately.** The rules above were
+written by reading the visible corpus, so the held-out families are the only evidence that
+any of this generalises rather than remembers — and that evidence can be spent once.
+`make sentinel-sealed` refuses to run until the `v1.0-freeze` tag exists, the same refusal
+`make bench-sealed` makes.
+
+Two rules — `override_previous` and `tool_name` — never fire on the measured corpus and
+so contributed nothing to the 92.1%. They are named as such in the test suite rather than
+left in the file to make the rule list look longer than it is.
 
 ### Compromise of the signing key or the gate process
 

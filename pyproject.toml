@@ -90,6 +90,9 @@ known-first-party = ["paynaka", "merchant", "buyer", "haat", "chaos"]
 # RUF001 flags ambiguous characters, which is the rule working correctly on content whose
 # entire purpose is to be that table.
 "paynaka/tty.py" = ["RUF001"]
+# sentinel.py matches payloads that spell things with lookalike characters on
+# purpose, so RUF001 fires on the patterns written to catch them.
+"paynaka/sentinel.py" = ["RUF001"]
 # build_corpus.py carries homoglyph and invisible-character payloads by design --
 # they are the obfuscated_payload family. RUF001-003 flag exactly those.
 "haat/build_corpus.py" = ["RUF001", "RUF002", "RUF003"]
