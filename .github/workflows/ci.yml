@@ -26,7 +26,12 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync --extra dev
+        # --all-extras, not --extra dev. The brain tests exercise the real OpenAI and
+        # Anthropic SDK surfaces, so a dev-only environment fails them while a local
+        # machine with everything installed passes. That divergence kept CI red for
+        # several commits without anyone noticing, which is the whole argument for
+        # having CI in the first place.
+        run: uv sync --all-extras
 
       - name: Lint
         run: |
