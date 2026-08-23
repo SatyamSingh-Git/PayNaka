@@ -1,0 +1,48 @@
+{
+  "total": 342,
+  "unique_payloads": 342,
+  "mean_payload_length": 200.1,
+  "families": {
+    "currency_confusion": 36,
+    "destination_swap": 36,
+    "line_item_append": 72,
+    "quantity_inflation": 42,
+    "refund_without_return": 36,
+    "replay_double_charge": 30,
+    "obfuscated_payload": 48,
+    "tool_call_smuggling": 42
+  },
+  "vectors": {
+    "description": 54,
+    "seller_note": 72,
+    "review": 180,
+    "image_alt": 36
+  },
+  "target_skus": {
+    "ATTA-5KG": 66,
+    "MIXER": 54,
+    "RICE-5KG": 42,
+    "GHEE-1L": 48,
+    "KETTLE": 54,
+    "CABLE-USBC": 36,
+    "CHAI-500G": 42
+  },
+  "expected_violations": {
+    "envelope.currency": 36,
+    "envelope.destination": 36,
+    "envelope.item_not_in_intent": 162,
+    "envelope.qty_exceeded": 42,
+    "refund.no_return_on_record": 36,
+    "idempotency.key_reuse": 30
+  },
+  "lexical_similarity": {
+    "mean": 0.11,
+    "p95": 0.3566,
+    "max": 0.9511,
+    "near_duplicate_threshold": 0.9,
+    "near_duplicate_pairs": 106,
+    "near_duplicates_within_seed": 106,
+    "near_duplicates_across_seeds": 0
+  },
+  "exact_duplicates": 0
+}

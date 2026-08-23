@@ -82,6 +82,9 @@ known-first-party = ["paynaka", "merchant", "buyer", "haat", "chaos"]
 # RUF001-003 flag exactly those, which is correct everywhere except here.
 "tests/adversarial/**" = ["S", "B011", "RUF001", "RUF002", "RUF003"]
 "haat/attacks/**" = ["S"]
+# build_corpus.py carries homoglyph and invisible-character payloads by design --
+# they are the obfuscated_payload family. RUF001-003 flag exactly those.
+"haat/build_corpus.py" = ["RUF001", "RUF002", "RUF003"]
 
 # ---------------------------------------------------------------- mypy
 [tool.mypy]
