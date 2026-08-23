@@ -25,6 +25,8 @@ dependencies = [
 [project.optional-dependencies]
 agent = [
     "anthropic>=0.40",
+    # OpenRouter is OpenAI-compatible, so one SDK reaches every model it fronts.
+    "openai>=1.60",
     "mcp>=1.1",
     "razorpay>=1.4",
 ]
@@ -80,7 +82,9 @@ known-first-party = ["paynaka", "merchant", "buyer", "haat", "chaos"]
 "tests/**" = ["S", "B011"]
 # The adversarial suite carries homoglyph and invisible-character payloads on purpose.
 # RUF001-003 flag exactly those, which is correct everywhere except here.
-"tests/adversarial/**" = ["S", "B011", "RUF001", "RUF002", "RUF003"]
+# RUF012 flags mutable class attributes. The stub response objects below are throwaway
+# shapes standing in for SDK responses, not real classes with shared state.
+"tests/adversarial/**" = ["S", "B011", "RUF001", "RUF002", "RUF003", "RUF012"]
 "haat/attacks/**" = ["S"]
 # build_corpus.py carries homoglyph and invisible-character payloads by design --
 # they are the obfuscated_payload family. RUF001-003 flag exactly those.

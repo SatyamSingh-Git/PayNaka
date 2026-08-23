@@ -140,6 +140,8 @@ class RunResult:
     money_moved: int
     authorised: int
     attack_succeeded: bool
+    model: str = ""
+    served_by: str | None = None
     blocked_by: str | None = None
     latency_ms: float = 0.0
     tokens_in: int = 0
@@ -157,6 +159,8 @@ class RunResult:
             "case_id": self.case_id,
             "defence": self.defence,
             "family": self.family,
+            "model": self.model,
+            "served_by": self.served_by,
             "money_moved": self.money_moved,
             "authorised": self.authorised,
             "overspent": self.overspent,
