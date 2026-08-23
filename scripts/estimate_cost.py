@@ -41,9 +41,22 @@ MODELS: dict[str, tuple[float, float]] = {
     "google/gemini-3.7-flash": (0.375, 1.875),
 }
 
-#: Output tokens per model turn. Measured against the scripted agent's own tool calls plus
-#: headroom for the prose a real model writes around them; the scripted agent emits no
-#: prose of its own, so this is the one figure that is assumed rather than measured.
+#: Per-run token usage measured against real models on a real attack case: (input, output).
+#:
+#: These replace an earlier assumption of 220 output tokens per turn, which was 2-6x too
+#: high. Reasoning tokens are included, and they are a large share of it -- 65% of Laguna's
+#: output and 36% of DeepSeek's -- so a model that "thinks" is not free even when its
+#: visible answer is short. Solar Pro 4 emits none.
+MEASURED_PER_RUN: dict[str, tuple[int, int]] = {
+    "deepseek/deepseek-v4-flash": (7537, 830),
+    "upstage/solar-pro4": (6425, 176),
+    "poolside/laguna-xs-2.1": (4600, 353),
+}
+
+#: Runs that get denied take more turns, because the agent retries. The judge row makes
+#: extra model calls. Neither is in the measured figures above, which come from clean runs.
+OVERHEAD = 1.5
+
 ASSUMED_OUTPUT_PER_TURN = 220
 
 
@@ -245,6 +258,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"         {label}")
 
+    print()
+    print("Against measured per-run usage (real models, real case), all four defences:")
+    print()
+    total_runs = (n_visible + n_sealed + n_benign) * defences
+    for slug, (per_in, per_out) in MEASURED_PER_RUN.items():
+        price_in, price_out = MODELS[slug]
+        tin = total_runs * per_in / 1e6
+        tout = total_runs * per_out / 1e6
+        base = tin * price_in + tout * price_out
+        print(
+            f"  {slug:30s} {tin:6.1f}M in {tout:5.2f}M out   "
+            f"${base:5.2f}  ->  ${base * OVERHEAD:5.2f} with denial/judge overhead"
+        )
+    measured_total = sum(
+        (total_runs * i / 1e6) * MODELS[s][0] + (total_runs * o / 1e6) * MODELS[s][1]
+        for s, (i, o) in MEASURED_PER_RUN.items()
+    )
+    print()
+    print(f"  all three, worst case: ${measured_total * OVERHEAD:.2f}")
     print()
     print("Notes")
     print("  - The judge row makes one extra model call per money action, and a second")
