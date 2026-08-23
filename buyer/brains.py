@@ -147,6 +147,7 @@ DEFAULT_PINS: dict[str, tuple[list[str], list[str] | None]] = {
     # Single provider. OpenRouter forwards straight through: nothing to route, nothing to
     # vary. The least ambiguous subject in the set.
     "upstage/solar-pro4": (["upstage"], None),
+    "poolside/laguna-xs-2.1": (["poolside"], ["fp8"]),
     # Multi-host models, pinned to one host and one quantization.
     "deepseek/deepseek-v4-flash": (["streamlake"], ["fp8"]),
     "z-ai/glm-5.2": (["streamlake"], ["fp8"]),

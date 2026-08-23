@@ -35,6 +35,7 @@ from paynaka.mandate import IntentMandate
 MODELS: dict[str, tuple[float, float]] = {
     "upstage/solar-pro4": (0.03, 0.12),
     "deepseek/deepseek-v4-flash": (0.04886, 0.09772),
+    "poolside/laguna-xs-2.1": (0.06, 0.12),
     "xiaomi/mimo-v2.5": (0.119, 0.238),
     "z-ai/glm-5.2": (0.336, 1.056),
     "google/gemini-3.7-flash": (0.375, 1.875),
