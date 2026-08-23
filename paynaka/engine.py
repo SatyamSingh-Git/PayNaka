@@ -34,6 +34,7 @@ from paynaka.gate import (
     MoneyRequest,
     Verdict,
     evaluate,
+    fingerprint_amount,
     request_hash,
     reservation_key,
 )
@@ -326,10 +327,16 @@ class PayNaka:
 
 
 def _describe(request: MoneyRequest) -> dict[str, Any]:
+    """What the audit chain records about an attempt, whatever the attempt contained.
+
+    Deliberately total. This runs for denials as well as approvals, and a request the gate
+    refused because its own arithmetic is impossible is exactly the one an incident review
+    wants to see.
+    """
     return {
         "action": request.action,
         "request_id": request.request_id,
-        "amount": request.effective_amount,
+        "amount": fingerprint_amount(request),
         "currency": request.currency,
         "destination": request.destination,
         "payment_id": request.payment_id,

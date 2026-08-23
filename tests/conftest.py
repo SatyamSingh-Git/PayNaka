@@ -7,9 +7,11 @@ into ₹52,000 including a gift card nobody asked for.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 
 import pytest
+from hypothesis import HealthCheck, settings
 
 from paynaka.clock import FrozenClock
 from paynaka.gate import LineItem, MoneyRequest
@@ -24,6 +26,37 @@ ATTA = "ATTA-5KG"
 GIFT_CARD = "GIFT-50K"
 HOME = "addr_home"
 ATTACKER_ADDR = "addr_attacker"
+
+# ---------------------------------------------------------------- hypothesis profiles
+#
+# The property tests in tests/adversarial/test_gate_properties.py explore generated
+# inputs, and how many they explore is a straight trade against how long `make check`
+# takes. Locally that budget is small enough to keep the loop fast; in CI, where nobody is
+# waiting at a keyboard, it is worth far more, because the whole point of a property test
+# is that the counterexample is the one nobody thought of.
+#
+# `HYPOTHESIS_PROFILE=thorough` runs the deeper sweep on demand.
+settings.register_profile(
+    "dev",
+    max_examples=120,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
+)
+settings.register_profile(
+    "ci",
+    max_examples=500,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
+)
+settings.register_profile(
+    "thorough",
+    max_examples=5_000,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
+)
+settings.load_profile(
+    os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev")
+)
 
 
 @pytest.fixture

@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Final
@@ -42,6 +42,7 @@ __all__ = [
     "MoneyRequest",
     "Verdict",
     "evaluate",
+    "fingerprint_amount",
     "request_hash",
     "reservation_key",
 ]
@@ -147,6 +148,24 @@ class GateDecision:
         }
 
 
+def fingerprint_amount(request: MoneyRequest) -> int | str:
+    """``effective_amount``, or a marker when the request's own arithmetic will not work.
+
+    A request carrying a negative quantity cannot be totalled -- ``mul_qty`` refuses, and
+    correctly. But it still has to be *fingerprintable* and *describable*, because the
+    gate is about to deny it and the audit record has to name what was attempted.
+
+    Found by the property tests: without this, one line item with ``qty=-1`` produced a
+    correct DENY from the gate and then an unhandled ``MoneyError`` from the engine while
+    it wrote the audit record for that denial. No money moved, and no record survived
+    saying anything had been tried -- and any caller could do it at will.
+    """
+    try:
+        return request.effective_amount
+    except (MoneyError, ValueError, OverflowError):
+        return "uncomputable"
+
+
 def request_hash(request: MoneyRequest) -> str:
     """A stable fingerprint of the money-relevant parts of a request.
 
@@ -154,10 +173,12 @@ def request_hash(request: MoneyRequest) -> str:
     body, which is a substitution attack. ``request_id`` is deliberately excluded: two
     retries of the same logical operation carry different request ids and must still
     hash the same.
+
+    Total by construction: it never raises, whatever the request contains.
     """
     payload = {
         "action": request.action,
-        "amount": request.effective_amount,
+        "amount": fingerprint_amount(request),
         "currency": request.currency,
         "destination": request.destination,
         "payment_id": request.payment_id,
@@ -527,27 +548,40 @@ def evaluate(
             latency_us=(time.perf_counter_ns() - started) // 1000,
         )
 
-    try:
-        checks: Sequence[GateDecision | None] = (
-            check_revoked(request, mandate, state),
-            check_expiry(mandate, clock),
-            check_structure(request, mandate),
-            check_action_authorised(request, mandate, policy),
-            check_currency(request, mandate),
-            check_items_subset(request, mandate),
-            check_quantities(request, mandate),
-            check_total(request, mandate, policy),
-            check_destination(request, mandate),
-            check_refund_bounds(request, mandate, state, policy),
-            check_daily_cap(request, state, policy, clock),
-            check_regulatory(request, mandate, state, policy, clock),
-        )
-    except (MoneyError, ValueError) as exc:
-        # A check raised rather than returned. Fail closed and say so: a crashed check is
-        # an unenforced check, and silently continuing past one is how gates get bypassed.
-        return finish(_deny("internal.check_raised", f"a gate check could not complete: {exc}"))
+    # Thunks, not results. An earlier version built these as a tuple of already-evaluated
+    # decisions, which meant every check ran on every request no matter what the first one
+    # said -- so "the first DENY short-circuits" was true of how the decision was picked
+    # and false of what actually executed. A later check that raised then overrode an
+    # earlier check's clean, specific denial with `internal.check_raised`. Found by the
+    # property tests, on a request whose only fault was a quantity of -1.
+    #
+    # Order is deliberate: cheapest and most certain first, so a revoked or expired
+    # mandate costs one lookup rather than a full envelope evaluation. `check_quantities`
+    # comes before `check_structure` because structure is the first check that totals the
+    # line items, and a negative quantity makes that arithmetic impossible.
+    checks: Sequence[Callable[[], GateDecision | None]] = (
+        lambda: check_revoked(request, mandate, state),
+        lambda: check_expiry(mandate, clock),
+        lambda: check_quantities(request, mandate),
+        lambda: check_structure(request, mandate),
+        lambda: check_action_authorised(request, mandate, policy),
+        lambda: check_currency(request, mandate),
+        lambda: check_items_subset(request, mandate),
+        lambda: check_total(request, mandate, policy),
+        lambda: check_destination(request, mandate),
+        lambda: check_refund_bounds(request, mandate, state, policy),
+        lambda: check_daily_cap(request, state, policy, clock),
+        lambda: check_regulatory(request, mandate, state, policy, clock),
+    )
 
-    for decision in checks:
+    for check in checks:
+        try:
+            decision = check()
+        except (MoneyError, ValueError, OverflowError) as exc:
+            # A check raised rather than returned. Fail closed and say so: a crashed check
+            # is an unenforced check, and silently continuing past one is how gates get
+            # bypassed.
+            return finish(_deny("internal.check_raised", f"a gate check could not complete: {exc}"))
         if decision is not None:
             return finish(decision)
 
