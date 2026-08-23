@@ -201,7 +201,7 @@ class TestRailFailures:
             verifier=signer.verifier(),
             clock=clock,
         )
-        created = naka.execute(order(), signed)
+        naka.execute(order(), signed)
         payment_attempt = MoneyRequest(
             action="capture_payment",
             request_id="r",
