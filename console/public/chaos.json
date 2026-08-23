@@ -15,7 +15,7 @@
         "books_disagree": 0,
         "named_refusals": [],
         "silent_drops": 0,
-        "audit_kinds": []
+        "audit_record_counts": {}
       },
       "paynaka": {
         "handler": "paynaka",
@@ -29,13 +29,10 @@
           "idempotency.replay"
         ],
         "silent_drops": 0,
-        "audit_kinds": [
-          "decision",
-          "executed",
-          "decision",
-          "executed",
-          "decision"
-        ]
+        "audit_record_counts": {
+          "decision": 3,
+          "executed": 2
+        }
       },
       "prevented": 0
     },
@@ -54,7 +51,7 @@
         "books_disagree": 0,
         "named_refusals": [],
         "silent_drops": 0,
-        "audit_kinds": []
+        "audit_record_counts": {}
       },
       "paynaka": {
         "handler": "paynaka",
@@ -68,13 +65,10 @@
           "idempotency.replay"
         ],
         "silent_drops": 0,
-        "audit_kinds": [
-          "decision",
-          "executed",
-          "decision",
-          "decision",
-          "executed"
-        ]
+        "audit_record_counts": {
+          "decision": 3,
+          "executed": 2
+        }
       },
       "prevented": 49900
     },
@@ -93,7 +87,7 @@
         "books_disagree": 0,
         "named_refusals": [],
         "silent_drops": 0,
-        "audit_kinds": []
+        "audit_record_counts": {}
       },
       "paynaka": {
         "handler": "paynaka",
@@ -107,13 +101,10 @@
           "idempotency.replay"
         ],
         "silent_drops": 0,
-        "audit_kinds": [
-          "decision",
-          "executed",
-          "decision",
-          "executed",
-          "decision"
-        ]
+        "audit_record_counts": {
+          "decision": 3,
+          "executed": 2
+        }
       },
       "prevented": 49900
     },
@@ -132,7 +123,7 @@
         "books_disagree": 0,
         "named_refusals": [],
         "silent_drops": 1,
-        "audit_kinds": []
+        "audit_record_counts": {}
       },
       "paynaka": {
         "handler": "paynaka",
@@ -146,13 +137,10 @@
           "refund.exceeds_capture"
         ],
         "silent_drops": 0,
-        "audit_kinds": [
-          "decision",
-          "decision",
-          "executed",
-          "decision",
-          "executed"
-        ]
+        "audit_record_counts": {
+          "decision": 3,
+          "executed": 2
+        }
       },
       "prevented": 0
     },
@@ -171,7 +159,7 @@
         "books_disagree": 0,
         "named_refusals": [],
         "silent_drops": 0,
-        "audit_kinds": []
+        "audit_record_counts": {}
       },
       "paynaka": {
         "handler": "paynaka",
@@ -185,13 +173,10 @@
           "idempotency.key_reuse"
         ],
         "silent_drops": 0,
-        "audit_kinds": [
-          "decision",
-          "executed",
-          "decision",
-          "executed",
-          "decision"
-        ]
+        "audit_record_counts": {
+          "decision": 3,
+          "executed": 2
+        }
       },
       "prevented": 149900
     },
@@ -210,7 +195,7 @@
         "books_disagree": 149700,
         "named_refusals": [],
         "silent_drops": 3,
-        "audit_kinds": []
+        "audit_record_counts": {}
       },
       "paynaka": {
         "handler": "paynaka",
@@ -226,15 +211,11 @@
           "idempotency.replay"
         ],
         "silent_drops": 1,
-        "audit_kinds": [
-          "decision",
-          "executed",
-          "decision",
-          "rail.indeterminate",
-          "decision",
-          "decision",
-          "decision"
-        ]
+        "audit_record_counts": {
+          "decision": 5,
+          "executed": 1,
+          "rail.indeterminate": 1
+        }
       },
       "prevented": 149700
     }

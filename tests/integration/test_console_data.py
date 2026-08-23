@@ -16,7 +16,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from scripts.console_data import chaos_payload, sentinel_payload
 
 pytestmark = pytest.mark.integration
@@ -51,7 +50,15 @@ class TestTheShapeTheScreenExpects:
         assert set(payload) >= {"scenarios", "totals"}
         assert set(payload["totals"]) >= {"naive_overspent", "paynaka_overspent"}
         for scenario in payload["scenarios"]:
-            assert set(scenario) >= {"key", "title", "hazard", "why", "naive", "paynaka", "prevented"}
+            assert set(scenario) >= {
+                "key",
+                "title",
+                "hazard",
+                "why",
+                "naive",
+                "paynaka",
+                "prevented",
+            }
             for side in ("naive", "paynaka"):
                 assert set(scenario[side]) >= {
                     "left_the_gateway",

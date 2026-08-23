@@ -31,6 +31,7 @@ import contextlib
 import json
 import sys
 import threading
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -378,7 +379,14 @@ class Side:
             "books_disagree": self.books_disagree,
             "named_refusals": self.named_refusals,
             "silent_drops": self.silent_drops,
-            "audit_kinds": self.audit_kinds,
+            # Counts, not the ordered list. Under the concurrent scenario two workers
+            # genuinely race to append, so the *order* of audit records varies between
+            # runs while the money does not -- which is correct, the chain records the
+            # order things actually arrived in. Exporting the sequence would publish a
+            # number that changes for no reason and claim a determinism the chain does
+            # not have. `Side.audit_kinds` keeps the order for the sequential scenarios,
+            # where it is meaningful and is asserted exactly.
+            "audit_record_counts": dict(sorted(Counter(self.audit_kinds).items())),
         }
 
 
