@@ -16,6 +16,7 @@ the endpoint says so in its own response, and HAAT is where the real measurement
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from collections import deque
@@ -47,6 +48,7 @@ from paynaka.proxy.mcp import McpProxy
 from paynaka.rails import build_rail
 from paynaka.state import SqliteState
 from paynaka.webhooks import (
+    EVENT_ID_HEADER,
     SIGNATURE_HEADER,
     WebhookError,
     load_webhook_secret,
@@ -505,12 +507,49 @@ async def razorpay_webhook(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="webhook signature did not verify")
 
     try:
-        event = parse_event(body)
+        event = parse_event(body, event_id=request.headers.get(EVENT_ID_HEADER))
     except WebhookError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    hub.emit("webhook.received", event.to_dict())
-    return {"accepted": True, **event.to_dict()}
+    # Verification answered "who sent this". Everything below is the separate question of
+    # what to do about it, and the endpoint used to stop at the first one -- it acknowledged
+    # a verified event and processed nothing, which made the README's reconciliation claim
+    # true of the engine and untrue of the route.
+    #
+    # Duplicate suppression first, keyed on Razorpay's own event id, claimed atomically.
+    # At-least-once is the only delivery guarantee on offer, so a redelivery is ordinary
+    # traffic rather than an attack -- and `make chaos` measures what processing one twice
+    # costs: Rs 3,994.
+    if event.event_id:
+        claimed = hub.naka.state.claim_idempotency(
+            f"webhook:{event.event_id}",
+            request_hash=hashlib.sha256(body).hexdigest(),
+            result_json=json.dumps(event.to_dict()),
+            clock=hub.clock,
+        )
+        if claimed is not None:
+            # Seen before. Acknowledged, not re-applied: a 200 stops the provider retrying,
+            # and a duplicate is not an error to report back.
+            hub.emit("webhook.duplicate", event.to_dict())
+            # Same shape as the applied path. A caller should not have to know which branch
+            # ran to know which keys exist.
+            return {
+                "accepted": True,
+                "duplicate": True,
+                "applied": None,
+                **event.to_dict(),
+            }
+
+    applied: str | None = None
+    if event.event == "payment.captured" and event.payment_id and event.amount:
+        # The state transition the ledger cares about. Recorded before the event is
+        # announced, so a reader of the audit chain never sees a claim the ledger cannot
+        # support.
+        hub.naka.state.record_capture(event.payment_id, event.amount, clock=hub.clock)
+        applied = "capture_recorded"
+
+    hub.emit("webhook.received", {**event.to_dict(), "applied": applied})
+    return {"accepted": True, "duplicate": False, "applied": applied, **event.to_dict()}
 
 
 @app.get("/api/events")

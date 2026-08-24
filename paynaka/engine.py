@@ -73,21 +73,68 @@ class ExecutionResult:
     suppressed: bool = False
 
     @property
-    def money_moved(self) -> int:
-        """Paise actually moved. Zero unless a rail confirmed movement.
+    def outcome(self) -> str:
+        """Where in the payment lifecycle this actually got to.
 
-        HAAT scores attack success on this number rather than on the verdict, because the
-        question a merchant cares about is not whether a gate said DENY but whether money
-        left the account.
+        Added because the previous vocabulary was wrong in the one place it mattered.
+        Razorpay's lifecycle is order -> customer authentication -> capture, and this
+        system autonomously reaches only the first of those: an order is an *intent to
+        collect*, and no money has left anybody's account when one is created. Reporting
+        that as "money moved" is the fastest way to lose a payments reviewer, and it was
+        the word this project used.
+
+        A blocked Rs 51,999 order is Rs 51,999 of authority refused. That is worth saying
+        plainly; it is not the same sentence as Rs 51,999 of prevented movement.
+        """
+        if not self.executed or self.rail_result is None:
+            return "blocked" if self.decision.verdict is not Verdict.ALLOW else "not_executed"
+        return {
+            "create_order": "order_created",
+            "capture_payment": "payment_captured",
+            "create_refund": "refunded",
+        }.get(self.decision.action, "executed")
+
+    @property
+    def value_at_risk(self) -> int:
+        """Paise this request would commit, whatever stage it reached.
+
+        The number HAAT scores on, and deliberately *not* called money moved. For an order
+        it is the amount the shopper would be asked to pay; for a capture or a refund it is
+        the amount that genuinely crosses the rail. Zero unless the rail confirmed the call.
         """
         if not self.executed or self.rail_result is None:
             return 0
         return int(getattr(self.rail_result, "amount", 0))
 
+    @property
+    def captured_paise(self) -> int:
+        """Paise that actually left an account. Only a capture or a refund can be nonzero.
+
+        This is the strict reading, and the one to quote at a payments reviewer. An order
+        contributes nothing here no matter how large it is.
+        """
+        if self.outcome not in ("payment_captured", "refunded"):
+            return 0
+        return self.value_at_risk
+
+    @property
+    def money_moved(self) -> int:
+        """Deprecated spelling of :attr:`value_at_risk`, kept so callers keep working.
+
+        The name was the defect. It is retained rather than deleted because a great deal of
+        harness code and committed evidence reads it, and a silent change of meaning under
+        an unchanged name would be worse than the original error.
+        """
+        return self.value_at_risk
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "decision": self.decision.to_dict(),
             "executed": self.executed,
+            "outcome": self.outcome,
+            "value_at_risk": self.value_at_risk,
+            "captured_paise": self.captured_paise,
+            # Kept for readers of older evidence files. Equal to value_at_risk.
             "money_moved": self.money_moved,
             "error": self.error,
             "audit_seq": self.audit_seq,

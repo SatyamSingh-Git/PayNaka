@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 __all__ = [
+    "EVENT_ID_HEADER",
     "WEBHOOK_SECRET_ENV_VAR",
     "WebhookError",
     "WebhookEvent",
@@ -54,6 +55,12 @@ WEBHOOK_SECRET_ENV_VAR: Final[str] = "RAZORPAY_WEBHOOK_SECRET"  # noqa: S105
 #: Razorpay signs the raw request body with the endpoint secret using HMAC-SHA256 and
 #: sends the hex digest in this header.
 SIGNATURE_HEADER: Final[str] = "X-Razorpay-Signature"
+
+#: Razorpay's own handle for a delivery, and what its documentation says to deduplicate on.
+#: This module originally read an `id` field off the top of the body, which is a shape I
+#: invented: a redelivery would have arrived with no dependable id and duplicate suppression
+#: would have silently had nothing to work with.
+EVENT_ID_HEADER: Final[str] = "X-Razorpay-Event-Id"
 
 #: A hex SHA-256 digest is exactly this long. Checked before comparing so a wildly
 #: malformed header is refused on shape rather than on content.
@@ -125,12 +132,17 @@ def verify_signature(body: bytes, signature: str | None, secret: str) -> bool:
     return hmac.compare_digest(expected.encode("ascii"), signature.encode("utf-8", "replace"))
 
 
-def parse_event(body: bytes) -> WebhookEvent:
+def parse_event(body: bytes, *, event_id: str | None = None) -> WebhookEvent:
     """Turn a verified body into an event, refusing anything that is not one.
 
     Every field is read defensively. A verified webhook proves who sent it and says nothing
     about the shape of what they sent, and a provider is free to add fields, rename nothing,
     and send a payload this code has never seen.
+
+    ``event_id`` comes from the ``X-Razorpay-Event-Id`` header, which is where Razorpay
+    documents it and the only place a redelivery reliably repeats it. The body's top-level
+    ``id`` is used only as a fallback, and it is a fallback rather than the source because
+    reading it there was this module's original mistake.
     """
     if len(body) > MAX_BODY_BYTES:
         raise WebhookError("webhook body is too large")
@@ -160,7 +172,7 @@ def parse_event(body: bytes) -> WebhookEvent:
         else _text(entity.get("payment_id")),
         order_id=_text(entity.get("order_id")),
         amount=amount,
-        event_id=_text(payload.get("id")),
+        event_id=event_id or _text(payload.get("id")),
         raw=payload,
     )
 

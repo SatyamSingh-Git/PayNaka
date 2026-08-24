@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2065 tests" src="https://img.shields.io/badge/tests-2065-2F6B4F?style=flat-square">
+  <img alt="2073 tests" src="https://img.shields.io/badge/tests-2073-2F6B4F?style=flat-square">
   <img alt="1332 adversarial" src="https://img.shields.io/badge/adversarial-1332-2F6B4F?style=flat-square">
   <img alt="coverage 92%" src="https://img.shields.io/badge/coverage-92%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
@@ -101,6 +101,34 @@ With nothing configured the service mints a development credential rather than a
 everyone — the check stays live, only the origin of the credential changes — and with a
 real rail configured it refuses to start without one.
 
+## What this actually does to a payment, and what it does not
+
+A payments reviewer will ask this first, so it is answered before anything else.
+
+Razorpay's lifecycle is **order → customer authentication → capture**. This system
+autonomously reaches only the first of those. An order is an *intent to collect*; no money
+has left anybody's account when one is created, and autonomous capture is not something a
+buying agent should be able to do — authentication is the customer's, by design.
+
+So the vocabulary is exact, and it did not used to be:
+
+| Term | Means |
+|---|---|
+| `order_created` | an order exists. Nothing has been paid. |
+| `payment_captured` | money genuinely left an account. |
+| `refunded` | money genuinely went back. |
+| `blocked` | the checkpoint refused before any of the above. |
+| `value_at_risk` | what a request would commit, at whatever stage it reached. |
+| `captured_paise` | strictly the second and third rows. An order contributes zero. |
+
+**A blocked ₹51,999 order is ₹51,999 of authority refused — not ₹51,999 of prevented
+movement.** The demo previously printed "money moved" for order creation. That was wrong,
+it was the fastest way to lose a reviewer's trust, and it is corrected everywhere including
+the committed evidence files.
+
+What that costs the pitch: this is a containment result, not an end-to-end payment result.
+What it buys: every number here means exactly what it says.
+
 ## Where the mandate comes from
 
 Everything above is downstream of a signed `IntentMandate` already existing, and until
@@ -149,6 +177,12 @@ so a tampered body would verify against its own normalisation.
 
 **No secret configured means nothing is accepted**, not that everything is. There is no
 development mode that skips verification.
+
+And verification is only half of it. The route deduplicates on Razorpay's own
+`X-Razorpay-Event-Id` header — where their documentation puts it, and the only place a
+redelivery reliably repeats it — then records the state transition. It previously
+acknowledged a verified event and applied nothing, which made this section true of the
+engine and untrue of the deployed path.
 
 And the line worth drawing: a verified webhook is trusted to have come from Razorpay, and
 nothing more. What it *claims* still passes the ledger's invariants — a genuine
@@ -662,7 +696,7 @@ verifies is worse than none.
 
 ## Testing
 
-2,065 tests, of which **1,332 are adversarial**. 92% branch coverage on `paynaka/`,
+2,073 tests, of which **1,332 are adversarial**. 92% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

@@ -107,7 +107,15 @@ def report(label: str, run: AgentRun, *, gate: bool) -> None:
     say(f"{BOLD}{label}{OFF}")
     say(f"  {DIM}checkpoint{OFF}     {'ON' if gate else f'{RED}OFF{OFF}'}")
     say(f"  {DIM}authorised{OFF}     {format_inr(run.authorised)}")
-    say(f"  {DIM}money moved{OFF}    {colour}{format_inr(run.money_moved)}{OFF}")
+    # Not "money moved". This flow autonomously reaches `create_order`, and an order is an
+    # intent to collect -- Razorpay's lifecycle puts customer authentication and capture
+    # after it, and nothing has left an account when one is created. A blocked Rs 51,999
+    # order is Rs 51,999 of authority refused, which is worth saying plainly and is not the
+    # same sentence as Rs 51,999 of prevented movement.
+    say(f"  {DIM}order value{OFF}    {colour}{format_inr(run.money_moved)}{OFF}")
+    say(
+        f"  {DIM}captured{OFF}       {DIM}{format_inr(0)}  (autonomous capture needs checkout){OFF}"
+    )
     say(f"  {DIM}overspent{OFF}      {colour}{format_inr(over)}{OFF}")
 
     if run.denials:

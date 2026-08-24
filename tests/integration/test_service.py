@@ -463,6 +463,107 @@ class TestTheWebhookSurface:
         assert response.status_code == 503
 
 
+class TestTheWebhookRouteProcessesRatherThanAcknowledges:
+    """Verification answers *who sent this*. Processing is a separate question, and the
+    route used to stop at the first one -- it acknowledged a verified event and applied
+    nothing, which made the reconciliation claim true of the engine and untrue of the
+    deployed path.
+
+    Driven black-box through HTTP, because an internal helper proves nothing about a route.
+    """
+
+    SECRET = "a-real-endpoint-secret-value"
+
+    def _post(self, client, body: bytes, *, event_id: str | None = "evt_1", sign: bool = True):  # type: ignore[no-untyped-def]
+        import hashlib
+        import hmac
+
+        headers = {"content-type": "application/json"}
+        if sign:
+            headers["X-Razorpay-Signature"] = hmac.new(
+                self.SECRET.encode(), body, hashlib.sha256
+            ).hexdigest()
+        if event_id:
+            headers["X-Razorpay-Event-Id"] = event_id
+        return client.post("/webhooks/razorpay", content=body, headers=headers)
+
+    def _captured(self, amount: int = 199_900, payment_id: str = "pay_route") -> bytes:
+        return json.dumps(
+            {
+                "event": "payment.captured",
+                "payload": {"payment": {"entity": {"id": payment_id, "amount": amount}}},
+            }
+        ).encode("utf-8")
+
+    @pytest.fixture(autouse=True)
+    def _secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", self.SECRET)
+
+    def test_a_verified_capture_is_applied(self, client: TestClient) -> None:
+        body = self._captured()
+        answer = self._post(client, body).json()
+        assert answer["accepted"] is True
+        assert answer["duplicate"] is False
+        assert answer["applied"] == "capture_recorded"
+
+    def test_the_event_id_comes_from_the_header(self, client: TestClient) -> None:
+        """Where Razorpay documents it. This module originally read an `id` off the top of
+        the body -- a shape I invented -- so a redelivery would have arrived with no
+        dependable id and duplicate suppression would have had nothing to work with."""
+        answer = self._post(client, self._captured(), event_id="evt_from_header").json()
+        assert answer["event_id"] == "evt_from_header"
+
+    def test_a_redelivery_is_suppressed_rather_than_reapplied(self, client: TestClient) -> None:
+        """At-least-once is the only delivery guarantee on offer, so this is ordinary
+        traffic. `make chaos` measures what applying one twice costs: Rs 3,994."""
+        body = self._captured(payment_id="pay_dup")
+        first = self._post(client, body, event_id="evt_dup").json()
+        second = self._post(client, body, event_id="evt_dup").json()
+        assert first["duplicate"] is False
+        assert second["duplicate"] is True
+        assert second["applied"] is None
+
+    def test_a_redelivery_still_returns_200(self, client: TestClient) -> None:
+        """A duplicate is not an error. Anything but a 200 makes the provider retry it."""
+        body = self._captured(payment_id="pay_ack")
+        self._post(client, body, event_id="evt_ack")
+        assert self._post(client, body, event_id="evt_ack").status_code == 200
+
+    def test_two_distinct_events_are_both_applied(self, client: TestClient) -> None:
+        """The control. Suppressing everything would satisfy the duplicate test above."""
+        a = self._post(client, self._captured(payment_id="pay_a"), event_id="evt_a").json()
+        b = self._post(client, self._captured(payment_id="pay_b"), event_id="evt_b").json()
+        assert a["applied"] == "capture_recorded"
+        assert b["applied"] == "capture_recorded"
+
+    def test_an_unsigned_event_is_never_processed(self, client: TestClient) -> None:
+        response = self._post(client, self._captured(), sign=False)
+        assert response.status_code == 401
+
+    def test_a_forged_signature_is_never_processed(self, client: TestClient) -> None:
+        body = self._captured()
+        import hashlib
+        import hmac
+
+        wrong = hmac.new(b"the-wrong-endpoint-secret", body, hashlib.sha256).hexdigest()
+        response = client.post(
+            "/webhooks/razorpay",
+            content=body,
+            headers={"X-Razorpay-Signature": wrong, "content-type": "application/json"},
+        )
+        assert response.status_code == 401
+
+    def test_an_event_this_route_does_not_act_on_is_still_acknowledged(
+        self, client: TestClient
+    ) -> None:
+        """Out-of-order and unknown lifecycle events arrive. Refusing them would make the
+        provider retry something this system has no transition for."""
+        body = json.dumps({"event": "payment.failed", "payload": {}}).encode("utf-8")
+        answer = self._post(client, body, event_id="evt_failed").json()
+        assert answer["accepted"] is True
+        assert answer["applied"] is None
+
+
 class TestPolicySurface:
     def test_policy_renders_amounts_for_humans(self, client: TestClient) -> None:
         body = client.get("/api/policy").json()
