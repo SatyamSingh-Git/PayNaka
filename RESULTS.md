@@ -4,7 +4,7 @@
 > runner over the committed corpus. None is typed by hand.
 
 - Corpus: **model-independent**
-- Generated: 2026-08-24 15:46 UTC
+- Generated: 2026-08-24 15:57 UTC
 - Runs: **39**
 
 > **Defences here have different applicability, so the aggregate row below has different denominators per defence and is not a like-for-like comparison. Read the per-family table: an em-dash means the defence has no causal path into that attack, which is not the same as scoring zero.**

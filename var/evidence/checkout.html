@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PayNaka - complete the test payment</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 4rem auto;
+         padding: 0 1rem; }
+  code { background: #eee; padding: .1rem .3rem; }
+  #out { margin-top: 2rem; padding: 1rem; background: #f4f4f4; white-space: pre-wrap; }
+</style>
+<h1>Complete the test payment</h1>
+<p>Order <code>order_TTfEwDFYYo2xsb</code> for &#8377;1,999.00, created through PayNaka
+against Razorpay test mode.</p>
+<p>This page exists because a buying agent <em>must not</em> be able to authenticate as the
+customer. That step is yours.</p>
+<p>Test card <code>4111 1111 1111 1111</code>, any future expiry, any CVV, any OTP.</p>
+<button id="pay">Pay &#8377;1,999.00</button>
+<div id="out"></div>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+document.getElementById('pay').onclick = function () {
+  new Razorpay({
+    key: 'rzp_test_TTfBnH0lnrIIB0',
+    order_id: 'order_TTfEwDFYYo2xsb',
+    amount: 199900,
+    currency: 'INR',
+    name: 'Kirana Corner (fictitious)',
+    description: '5kg atta',
+    handler: function (r) {
+      document.getElementById('out').textContent =
+        'payment_id: ' + r.razorpay_payment_id +
+        '\nsignature:  ' + r.razorpay_signature +
+        '\n\nNow run:\n  python -m scripts.razorpay_test_lifecycle --payment-id ' +
+        r.razorpay_payment_id;
+    },
+  }).open();
+};
+</script>

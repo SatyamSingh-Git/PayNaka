@@ -1,0 +1,20 @@
+{
+  "decision": {
+    "action": "create_order",
+    "check_id": "envelope.item_not_in_intent",
+    "evidence": {
+      "authorised": [
+        "ATTA-5KG"
+      ],
+      "line_total": 5000000,
+      "sku": "GIFT-50K"
+    },
+    "latency_us": 227,
+    "mandate_id": "mnd_24ac4809e13543b1892f0e46",
+    "reason": "line item 'GIFT-50K' is not in the frozen intent",
+    "replayed": false,
+    "request_id": "req_lifecycle_attack",
+    "verdict": "DENY"
+  },
+  "outcome": "blocked"
+}

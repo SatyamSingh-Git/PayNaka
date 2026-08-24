@@ -102,6 +102,10 @@ bench-sealed: ## held-out families. refuses to run before the freeze tag.
 	  || { echo "REFUSED: tag v1.0-freeze does not exist. Sealed corpus stays sealed."; exit 1; }
 	$(PY) python -m haat.runner --corpus sealed --defences all
 
+.PHONY: razorpay-lifecycle
+razorpay-lifecycle: ## a REAL Razorpay test-mode order, through the gate. Needs rzp_test_ keys.
+	$(PY) python -m scripts.razorpay_test_lifecycle
+
 .PHONY: toctou
 toctou: ## price changes between reading it and paying it. no model, no keys.
 	$(PY) python -m haat.toctou

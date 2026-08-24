@@ -67,6 +67,14 @@ console/.env.local
 !var/fixtures/
 !var/fixtures/*.db
 
+# Real Razorpay test-mode evidence: the raw API responses and the gate decisions beside
+# them. Committed because "show me the payment id" is the first thing a payments reviewer
+# asks, and prose is not an answer. The signing key and the databases in that directory are
+# NOT committed -- one is a credential and the others are runtime state.
+!var/evidence/
+!var/evidence/*.json
+!var/evidence/checkout.html
+
 # External review write-ups. Notes *about* the project, not output *of* it -- they are
 # somebody's assessment, and committing them would put a third party's words in the
 # repository's voice.
