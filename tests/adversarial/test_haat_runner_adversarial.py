@@ -144,13 +144,33 @@ class TestSealedCorpusDiscipline:
         assert "generalisation" in message
         assert "development set" in message
 
-    def test_the_freeze_tag_really_does_not_exist_yet(self) -> None:
-        """If this starts failing, the freeze has happened and that is a milestone."""
+    def test_the_freeze_has_happened(self) -> None:
+        """This used to assert the opposite, as a tripwire: *if this starts failing, the
+        freeze has happened and that is a milestone*. It fired, exactly as intended.
+
+        The tag exists now, so the sealed corpus may run -- and the held-out sentinel score
+        has been taken and published: 64.4% against 92.1% on the visible families. The
+        assertion is inverted rather than deleted because the tag is load-bearing. Deleting
+        it locally would silently re-open the sealed corpus to a run that nothing gates.
+        """
         result = subprocess.run(
             ["git", "rev-parse", "v1.0-freeze"],
             capture_output=True,
         )
-        assert result.returncode != 0, "v1.0-freeze exists; the sealed corpus may now run"
+        assert result.returncode == 0, (
+            "v1.0-freeze is missing. It was cut once and the held-out evidence was spent "
+            "against it; without the tag the sealed corpus is ungated."
+        )
+
+    def test_the_guard_permits_the_sealed_corpus_once_the_tag_exists(self, monkeypatch) -> None:
+        """The other half of the guard. A gate that refuses in both states is not a gate,
+        and the refusal tests above would pass against one."""
+        monkeypatch.setattr("haat.runner._freeze_tag_exists", lambda: True)
+        # It gets past the freeze check and stops on the *next* guard instead -- needing a
+        # real model -- which is what "the freeze no longer blocks it" looks like.
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        assert main(["--corpus", "sealed", "--limit", "1"]) == 2
 
 
 class TestSmokeModeCannotProduceResults:
