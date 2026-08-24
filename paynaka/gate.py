@@ -671,6 +671,13 @@ def evaluate(
     if reservation is not None:
         return finish(reservation)
 
+    # The claim that makes `max_total` a budget rather than a per-request ceiling. Last,
+    # because everything above can still refuse, and authority claimed by a request that
+    # is then denied is authority quietly burned.
+    exhausted = _reserve_mandate(request, mandate, state, clock)
+    if exhausted is not None:
+        return finish(exhausted)
+
     return finish(
         GateDecision(
             verdict=Verdict.ALLOW,
@@ -680,6 +687,9 @@ def evaluate(
             evidence={
                 "amount": request.effective_amount,
                 "authorised": mandate.max_total,
+                # What is left afterwards, so a reader can see a budget draining rather
+                # than inferring it from a sequence of identical-looking approvals.
+                "mandate_remaining": state.mandate_remaining(mandate.mandate_id, mandate.max_total),
                 # Present only when a person unlocked this. An ALLOW above the auto-approval
                 # band should never be readable without the approval that released it.
                 **({"released_by_escalation": released_by} if released_by else {}),
@@ -696,6 +706,55 @@ def reservation_key(request: MoneyRequest) -> str:
     when policy does not require one, since something must be unique per attempt.
     """
     return request.idempotency_key or f"req:{request.request_id}"
+
+
+#: Actions that commit the shopper to *new* spending, and therefore consume mandate
+#: authority. Deliberately only `create_order`: a capture settles an order whose authority
+#: was already claimed when the order was created, and counting it again would exhaust a
+#: mandate at half its budget. A refund returns money and has its own balance claim.
+SPENDING_ACTIONS: Final[frozenset[str]] = frozenset({"create_order"})
+
+
+def _reserve_mandate(
+    request: MoneyRequest, mandate: IntentMandate, state: SqliteState, clock: Clock
+) -> GateDecision | None:
+    """Claim this purchase against the mandate's *remaining* authority.
+
+    Without this, ``max_total`` was a per-request ceiling wearing a budget's name.
+    ``check_total`` asks "does this request fit?" and three requests of Rs 1,999 each fit a
+    Rs 1,999 mandate perfectly well -- measured: one signed mandate moved Rs 5,997 across
+    three calls with three fresh idempotency keys, every one of them ALLOW. Idempotency
+    stops the *same* request repeating and has never stopped a caller spending the same
+    authority again under a new key.
+
+    Placed after the idempotency claim on purpose. A replay must not be charged twice for
+    one purchase, and a request still waiting on a human has not been acted on and should
+    hold nothing -- the same reasoning that already governs the refund claim below.
+    """
+    if request.action not in SPENDING_ACTIONS:
+        return None
+
+    key = reservation_key(request)
+    amount = request.effective_amount
+    if amount <= 0:
+        # Nothing to claim. `check_structure` permits a zero-value request -- an order with
+        # no line items and no stated amount -- and a request that moves no money spends no
+        # authority. Found by the property tests, which reached this with `items=()` and
+        # turned a clean verdict into an unhandled StateError from the ledger.
+        return None
+    if state.reserve_mandate_spend(mandate.mandate_id, key, amount, mandate.max_total, clock=clock):
+        return None
+
+    spent = state.mandate_spent(mandate.mandate_id)
+    return _deny(
+        "envelope.mandate_exhausted",
+        f"this mandate has {mandate.max_total - spent} paise of authority left and this "
+        f"request needs {amount}",
+        requested=amount,
+        authorised=mandate.max_total,
+        already_spent=spent,
+        remaining=max(0, mandate.max_total - spent),
+    )
 
 
 def _reserve_refund(request: MoneyRequest, state: SqliteState, clock: Clock) -> GateDecision | None:

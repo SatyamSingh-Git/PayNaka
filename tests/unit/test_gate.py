@@ -37,7 +37,13 @@ class TestHappyPath:
         self, legit_order, mandate, state, policy, clock
     ) -> None:
         result = evaluate(legit_order, mandate, state=state, policy=policy, clock=clock)
-        assert result.evidence == {"amount": AUTHORISED, "authorised": AUTHORISED}
+        # `mandate_remaining` joins the evidence now that max_total is a budget rather
+        # than a per-request ceiling: 0 left after spending the whole authorisation.
+        assert result.evidence == {
+            "amount": AUTHORISED,
+            "authorised": AUTHORISED,
+            "mandate_remaining": 0,
+        }
 
     def test_open_ended_budget_permits_any_sku(self, clock, state, policy) -> None:
         """'Something under two thousand rupees' -- no SKU named, so any SKU qualifies."""

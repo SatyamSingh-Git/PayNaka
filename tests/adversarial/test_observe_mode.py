@@ -132,11 +132,32 @@ class TestItActuallyObserves:
         assert result.money_moved == 0
 
     def test_a_permitted_request_is_unaffected_by_the_mode(
-        self, observing: PayNaka, enforcing: PayNaka, signed: SignedMandate
+        self,
+        observing: PayNaka,
+        enforcing: PayNaka,
+        signed: SignedMandate,
+        signer: MandateSigner,
+        mandate: IntentMandate,
+        clock: FrozenClock,
     ) -> None:
-        """Observe mode changes what happens to refusals, and nothing else."""
+        """Observe mode changes what happens to refusals, and nothing else.
+
+        Two mandates rather than one, because `max_total` is cumulative: both engines share
+        a state store, so a single mandate spent by the enforcing run has nothing left for
+        the observing one, and the test would be measuring exhausted authority rather than
+        the mode.
+        """
         allowed = enforcing.execute(order(key="k_enforce"), signed)
-        watched = observing.execute(order(key="k_observe"), signed)
+        second = IntentMandate.create(
+            clock=clock,
+            subject=mandate.subject,
+            session_id="sess_observe",
+            max_total=mandate.max_total,
+            allowed_skus=mandate.allowed_skus,
+            allowed_destinations=mandate.allowed_destinations,
+            max_qty_per_sku=mandate.max_qty_per_sku,
+        )
+        watched = observing.execute(order(key="k_observe"), signer.sign(second))
         assert allowed.money_moved == AUTHORISED
         assert watched.money_moved == AUTHORISED
         assert watched.suppressed is False

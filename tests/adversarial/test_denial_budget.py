@@ -32,7 +32,9 @@ pytestmark = pytest.mark.adversarial
 NOW = "2026-08-24 15:00"
 
 
-def _stack(seed: str, breaker: CircuitBreaker | None = None):  # type: ignore[no-untyped-def]
+def _stack(  # type: ignore[no-untyped-def]
+    seed: str, breaker: CircuitBreaker | None = None, *, budget: int = 199_900
+):
     naka, signer, _rail, clock = _fresh_stack(seed)
     if breaker is not None:
         naka.policy = dataclasses.replace(naka.policy, circuit_breaker=breaker)
@@ -40,7 +42,7 @@ def _stack(seed: str, breaker: CircuitBreaker | None = None):  # type: ignore[no
         clock=clock,
         subject="cust_1",
         session_id="sess_1",
-        max_total=199_900,
+        max_total=budget,
         allowed_skus=("ATTA-5KG",),
         allowed_destinations=("addr_home",),
         max_qty_per_sku=3,
@@ -201,7 +203,12 @@ class TestItTrips:
 
 class TestItDoesNotTripOnHonestTraffic:
     def test_approvals_are_never_counted(self) -> None:
-        naka, signed, _clock = _stack("approvals", CircuitBreaker(denials_per_session=3))
+        # Budgeted for ten purchases on purpose. `max_total` is cumulative now, so a
+        # mandate sized for one order would exhaust itself here and the test would be
+        # measuring mandate authority instead of the breaker it is named after.
+        naka, signed, _clock = _stack(
+            "approvals", CircuitBreaker(denials_per_session=3), budget=10 * 199_900
+        )
         for i in range(10):
             result = naka.execute(_allowed(i), signed)
             assert result.decision.verdict is Verdict.ALLOW

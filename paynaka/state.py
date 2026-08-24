@@ -76,6 +76,15 @@ CREATE TABLE IF NOT EXISTS reservations (
 );
 CREATE INDEX IF NOT EXISTS reservations_held ON reservations (payment_id, state);
 
+CREATE TABLE IF NOT EXISTS mandate_spend (
+    mandate_id TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    amount     INTEGER NOT NULL CHECK (amount > 0),
+    at         INTEGER NOT NULL,
+    PRIMARY KEY (mandate_id, key)
+);
+CREATE INDEX IF NOT EXISTS mandate_spend_by_mandate ON mandate_spend (mandate_id);
+
 CREATE TABLE IF NOT EXISTS returns (
     payment_id TEXT PRIMARY KEY,
     at         INTEGER NOT NULL
@@ -382,6 +391,69 @@ class SqliteState:
         return remaining
 
     # ---------------------------------------------------------------- reservations
+    def reserve_mandate_spend(
+        self, mandate_id: str, key: str, amount: int, ceiling: int, *, clock: Clock | None = None
+    ) -> bool:
+        """Atomically claim ``amount`` of a mandate's *remaining* authority. ``True`` if claimed.
+
+        This is what makes ``max_total`` a budget rather than a per-request ceiling, and
+        its absence was a hole straight through the project's central claim. ``check_total``
+        asks "does this request fit the budget?" and every request answered yes, so one
+        signed mandate authorising Rs 1,999 moved Rs 5,997 across three requests with three
+        fresh idempotency keys. Idempotency stops the *same* request repeating; it has
+        never stopped a caller spending the same authority again under a new key.
+
+        One statement, for the same reason as :meth:`reserve_refund`: the remaining balance
+        is computed inside the ``INSERT``, so there is no instant at which two callers both
+        read the same remainder and both decide they fit inside it.
+
+        Keyed on ``(mandate_id, key)`` so a replay of one request is a no-op that returns
+        ``True`` -- it already holds its reservation, and charging it twice for one purchase
+        would be the mirror of the bug this fixes.
+        """
+        if isinstance(amount, bool) or not isinstance(amount, int):
+            raise StateError(f"a mandate claim must be int paise, got {type(amount).__name__}")
+        if isinstance(ceiling, bool) or not isinstance(ceiling, int):
+            raise StateError(f"a ceiling must be int paise, got {type(ceiling).__name__}")
+        if amount <= 0:
+            raise StateError("a mandate claim must be for a positive amount")
+        if not mandate_id or not key:
+            raise StateError("a mandate claim needs a mandate and a key")
+
+        now = self._now(clock)
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT amount FROM mandate_spend WHERE mandate_id = ? AND key = ?",
+                (mandate_id, key),
+            ).fetchone()
+            if existing is not None:
+                # Already claimed by this exact request. A retry is not a second purchase.
+                return True
+            cursor = self._conn.execute(
+                """
+                INSERT OR IGNORE INTO mandate_spend (mandate_id, key, amount, at)
+                SELECT ?, ?, ?, ?
+                WHERE ? <= ? - (
+                    SELECT COALESCE(SUM(amount), 0) FROM mandate_spend WHERE mandate_id = ?
+                )
+                """,
+                (mandate_id, key, amount, now, amount, ceiling, mandate_id),
+            )
+            return cursor.rowcount == 1
+
+    def mandate_spent(self, mandate_id: str) -> int:
+        """What this mandate has already committed. Read off the same rows the claim uses."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) FROM mandate_spend WHERE mandate_id = ?",
+                (mandate_id,),
+            ).fetchone()
+        return int(row[0])
+
+    def mandate_remaining(self, mandate_id: str, ceiling: int) -> int:
+        """Authority left. Never negative, so a caller cannot read a breach as headroom."""
+        return max(0, ceiling - self.mandate_spent(mandate_id))
+
     def reserve_refund(
         self, key: str, payment_id: str, amount: int, *, clock: Clock | None = None
     ) -> bool:

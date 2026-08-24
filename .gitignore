@@ -66,3 +66,9 @@ console/.env.local
 # catch anything. One intact chain, one with a denial rewritten as an approval.
 !var/audit.db
 !var/audit-tampered.db
+
+# External review write-ups. Notes *about* the project, not output *of* it -- they are
+# somebody's assessment, and committing them would put a third party's words in the
+# repository's voice.
+JUDGE_REVIEW.md
+*_REVIEW.md
