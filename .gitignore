@@ -34,12 +34,21 @@ console/.vite/
 *.db
 *.db-wal
 *.db-shm
-var/
+# `var/*` rather than `var/`: git cannot re-include a file inside an ignored
+# directory, so the audit fixtures below would stay invisible.
+var/*
 runs/
 .artifacts/
 
-# ---- benchmark output (RESULTS.md is committed; raw runs are not) ----
-haat/out/
+# ---- benchmark output ----------------------------------------------------
+# The raw runs ARE committed. Numbers in prose are assertions; numbers with a JSONL
+# beside them are results, and a reviewer who cannot re-run must still be able to diff
+# the claim against the artifact.
+#
+# Only the run's own bookkeeping is excluded: a lock names a live PID and a stamp
+# describes one machine's run, and neither is evidence of anything.
+haat/out/*.lock
+haat/out/*.stamp
 haat/.cache/
 
 # ---- editors / os ----
@@ -51,3 +60,9 @@ Thumbs.db
 
 # The dev approver credential, handed to Vite by `make dev`.
 console/.env.local
+
+# The audit fixtures ARE committed. `make audit-verify` on a fresh clone had nothing to
+# verify, which made the hash chain an unfalsifiable claim: a verifier nobody has seen
+# catch anything. One intact chain, one with a denial rewritten as an approval.
+!var/audit.db
+!var/audit-tampered.db

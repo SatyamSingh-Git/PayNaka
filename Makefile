@@ -110,6 +110,10 @@ toctou: ## price changes between reading it and paying it. no model, no keys.
 toctou-probe: ## cents: do real agents notice the price changed? (needs a model key)
 	$(PY) python -m scripts.probe_toctou
 
+.PHONY: modelfree
+modelfree: ## the four defences over the attacks that land. no model, no keys.
+	$(PY) python -m haat.modelfree
+
 .PHONY: latency
 latency: ## what the checkpoint costs. no model, no keys, no network.
 	$(PY) python -m haat.latency
@@ -135,8 +139,15 @@ sentinel-sealed: ## score the detector on held-out families. refuses before the 
 	$(PY) python -m haat.sentinel_eval --include-sealed --per-rule
 
 .PHONY: audit-verify
-audit-verify: ## recompute the hash chain, print first break
-	$(PY) python -m paynaka.audit --verify
+audit-verify: ## recompute the committed chains: one intact, one tampered
+	@echo "-- intact --"
+	@$(PY) python -m paynaka.audit --db var/audit.db --verify
+	@echo "-- tampered (a denial rewritten as an approval) --"
+	@$(PY) python -m paynaka.audit --db var/audit-tampered.db --verify || true
+
+.PHONY: seed-audit
+seed-audit: ## regenerate the committed audit fixtures
+	$(PY) python -m scripts.seed_audit
 
 .PHONY: clean
 clean: ## remove generated artifacts (never touches source)

@@ -14,7 +14,7 @@
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
   <img alt="2015 tests" src="https://img.shields.io/badge/tests-2015-2F6B4F?style=flat-square">
   <img alt="1282 adversarial" src="https://img.shields.io/badge/adversarial-1282-2F6B4F?style=flat-square">
-  <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
+  <img alt="coverage 92%" src="https://img.shields.io/badge/coverage-92%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
 
@@ -103,8 +103,8 @@ real rail configured it refuses to start without one.
 
 ## Where the mandate comes from
 
-Everything above is downstream of a signed `IntentMandate` already existing, and for most of
-this project's life **nothing produced one**. `IntentMandate.create` was called by the demo
+Everything above is downstream of a signed `IntentMandate` already existing, and until
+late in the build **nothing produced one**. `IntentMandate.create` was called by the demo
 service and eight test harnesses — the whole argument rested on an object no production code
 path created. `paynaka/issuer.py` is that path.
 
@@ -313,6 +313,35 @@ Every tier's limit is written down next to it, including the one that ends all o
 attacker holding the gate, the notary key **and** the merchant's Razorpay account has won,
 and no arrangement of hashes changes that.
 
+## The four defences, over the attacks that land
+
+HAAT ships 540 injection cases and four defence strategies, and for a while the four-way
+comparison — the actual deliverable — was empty. Not because the harness was broken:
+because the attack does not land. Running the sweep anyway would have printed four rows of
+0% that read like a triumph to anyone skimming.
+
+Meanwhile the two attacks here that *do* land every time had never been wired to the
+benchmark at all. They are now. `make modelfree`, no model, no keys, no network, every row
+deterministic — and `RESULTS.md` and `haat/out/modelfree.jsonl` are committed beside it:
+
+| Family | none | prompt hardening | **PayNaka** | judge |
+| --- | ---: | ---: | ---: | ---: |
+| price moved between reading and paying | 9/9 breached | 9/9 breached | **0/9** | n/a |
+| webhook delivered twice, reordered, altered | 4/6 breached | n/a | **0/6** | n/a |
+| overspent | ₹1,60,215.85 | ₹1,56,221.85 | **₹0.00** | — |
+
+**`none` and `prompt` are identical on the repricing family**, to the paise. Byte-identical
+machinery; only the system prompt differs. That gap is the entire measurable contribution
+of prompt hardening against an attack with no injected text in it, and it is zero.
+
+**Two of the four defences do not apply, and that is the finding rather than a gap.** A
+prompt has nobody to instruct when a redelivery arrives from the payment provider. And
+`judge` would see `create_order(ATTA-5KG x 1)` — exactly what the shopper asked for;
+catching the reprice means remembering a price from an earlier turn and doing exact
+arithmetic against a budget, which is a deterministic bound wearing a model's costume and
+priced like a model. The table prints `n/a` rather than `0%`, because a defence with no
+causal path into an attack did not earn a win.
+
 ## Benchmark: a negative result, reported straight
 
 HAAT ships 540 cases — 252 visible attacks across six families, 90 sealed cases across two
@@ -372,7 +401,8 @@ generalises. `v1.0-freeze` is cut; `make sentinel-sealed` scored them once:
 That is the honest measurement of a keyword-and-structure heuristic meeting text it was not
 fitted to, and it is what the visible 92.1% was always at risk of concealing.
 
-The detector has not been touched since. Tuning it now would turn the held-out set into
+The detector has not been changed since that number existed. Tuning it now would turn the
+held-out set into
 just another fitted one, and there is no second held-out set to catch that.
 
 **Read what this does and does not say about the system.** If PayNaka's guarantee rested on
@@ -632,7 +662,7 @@ verifies is worse than none.
 
 ## Testing
 
-2,015 tests, of which **1,282 are adversarial**. 88% branch coverage on `paynaka/`,
+2,015 tests, of which **1,282 are adversarial**. 92% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

@@ -1,0 +1,86 @@
+{
+  "corpus": "model-independent",
+  "generated": "2026-08-24 10:36 UTC",
+  "runs": 39,
+  "defences": [
+    {
+      "defence": "none",
+      "attacks": 15,
+      "attacks_succeeded": 13,
+      "attack_success_rate": 0.8667,
+      "benign": 0,
+      "benign_wrongly_blocked": 0,
+      "benign_pass_rate": 0.0,
+      "total_overspent_paise": 16021585,
+      "median_latency_ms": 0.0,
+      "p95_latency_ms": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "errors": 0,
+      "refusals": 0,
+      "by_family": {
+        "price_moved": {
+          "cases": 9,
+          "succeeded": 9,
+          "rate": 1.0
+        },
+        "webhook_duplicate": {
+          "cases": 6,
+          "succeeded": 4,
+          "rate": 0.6667
+        }
+      }
+    },
+    {
+      "defence": "prompt",
+      "attacks": 9,
+      "attacks_succeeded": 9,
+      "attack_success_rate": 1.0,
+      "benign": 0,
+      "benign_wrongly_blocked": 0,
+      "benign_pass_rate": 0.0,
+      "total_overspent_paise": 15622185,
+      "median_latency_ms": 0.0,
+      "p95_latency_ms": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "errors": 0,
+      "refusals": 0,
+      "by_family": {
+        "price_moved": {
+          "cases": 9,
+          "succeeded": 9,
+          "rate": 1.0
+        }
+      }
+    },
+    {
+      "defence": "naka",
+      "attacks": 15,
+      "attacks_succeeded": 0,
+      "attack_success_rate": 0.0,
+      "benign": 0,
+      "benign_wrongly_blocked": 0,
+      "benign_pass_rate": 0.0,
+      "total_overspent_paise": 0,
+      "median_latency_ms": 0.0,
+      "p95_latency_ms": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "errors": 0,
+      "refusals": 0,
+      "by_family": {
+        "price_moved": {
+          "cases": 9,
+          "succeeded": 0,
+          "rate": 0.0
+        },
+        "webhook_duplicate": {
+          "cases": 6,
+          "succeeded": 0,
+          "rate": 0.0
+        }
+      }
+    }
+  ]
+}

@@ -39,7 +39,7 @@ jobs:
           uv run ruff format --check .
 
       - name: Types (strict)
-        run: uv run mypy paynaka
+        run: uv run mypy paynaka merchant haat chaos
 
       - name: Forward tests
         run: uv run pytest -m "not adversarial" --cov --cov-report=term-missing
