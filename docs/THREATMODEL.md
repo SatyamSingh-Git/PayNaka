@@ -256,6 +256,43 @@ it is the defensible direction, and an operator clears it with `unrevoke()` and
 
 ---
 
+### Observe mode, and why it is not a hole
+
+`PAYNAKA_MODE=observe` makes the checkpoint compute every decision, record it, and then
+let the request through. That is a feature whose *purpose* is to not stop things, which
+makes it the most plausible place in this project for a hole to hide. Three properties keep
+it honest, and each is tested rather than asserted.
+
+**The mode is on every record.** Every decision the chain carries is stamped with the mode
+that produced it, and a suppressed refusal is its own `observed` record naming the check
+and the amount. It is therefore impossible to read the audit log later and conclude the
+checkpoint was enforcing when it was not. The failure this design fears most is an operator
+who believes they are protected and is not, so the mode is loud in the health endpoint, the
+audit chain and the console rather than being a line in a config file nobody reads twice.
+
+**It withholds authority judgments, not correctness.** Signature verification and
+idempotency are live in both modes:
+
+| Check | Observing | Why |
+|---|---|---|
+| mandate signature | **enforced** | there is no "what would have happened anyway": without the checkpoint there is no mandate, and acting on an unverifiable one executes whatever an attacker put in the payload |
+| idempotency replay | **enforced** | suppressing it would mean issuing a second payment the checkpoint had already made — that is not observation, it is damage |
+| every envelope, policy and regulatory check | observed | declining to enforce these means declining to stop what would have happened without the checkpoint at all |
+
+**The circuit breaker does not advance.** Withdrawing a session's authority is an
+enforcement action, and there is no retry loop to bound when nothing is being refused. Sixty
+refusals in observe mode revoke nothing, and the test says so.
+
+`enforce` is the default. A typo in the mode is a startup failure rather than a fallback in
+either direction: falling back to `enforce` would be the safe direction and still wrong,
+because the operator asked for something, got something else, and nothing said so.
+
+Its limit, stated plainly: **while observing, PayNaka is not a defence.** Every attack in
+this document succeeds. That is the entire point of the mode and it is the reason it is
+opt-in, named after what it does, and reported on every record it writes.
+
+---
+
 ## What is **not** defended
 
 ### Prompt injection is not solved

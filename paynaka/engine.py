@@ -45,6 +45,7 @@ from paynaka.mandate import (
     MandateVerifier,
     SignedMandate,
 )
+from paynaka.mode import Mode
 from paynaka.policy import Policy
 from paynaka.rails.base import Rail, RailDeclined, RailError
 from paynaka.state import SqliteState
@@ -63,6 +64,12 @@ class ExecutionResult:
     audit_seq: int | None = None
     audit_hash: str | None = None
     provenance: dict[str, Any] = field(default_factory=dict)
+    #: Which mode produced this. Carried on the result, not inferred from it, so a reader
+    #: never has to reconstruct whether the checkpoint was enforcing at the time.
+    mode: Mode = Mode.ENFORCE
+    #: A refusal that was computed and then not acted on, because the mode is ``observe``.
+    #: This is the field a shadow-mode report counts.
+    suppressed: bool = False
 
     @property
     def money_moved(self) -> int:
@@ -85,6 +92,8 @@ class ExecutionResult:
             "audit_seq": self.audit_seq,
             "audit_hash": self.audit_hash,
             "provenance": self.provenance,
+            "mode": self.mode.value,
+            "suppressed": self.suppressed,
         }
 
 
@@ -103,6 +112,7 @@ class PayNaka:
         notary: Notary | None = None,
         anchors: AnchorLog | None = None,
         anchor_every: int = 20,
+        mode: Mode = Mode.ENFORCE,
     ) -> None:
         self.rail = rail
         self.policy = policy
@@ -110,6 +120,9 @@ class PayNaka:
         self.audit = audit
         self.verifier = verifier
         self.clock = clock or SystemClock()
+        # Enforce unless told otherwise. A checkpoint that does not enforce by default
+        # is a checkpoint somebody forgot to switch on.
+        self.mode = mode
 
         # Witnessing, optional and off by default so nothing that already works changes
         # shape. Supply a notary and a log and the chain stops being merely self-consistent:
@@ -150,31 +163,71 @@ class PayNaka:
                     "max_total": mandate.max_total,
                 },
                 "provenance": provenance,
+                # On every record, so it is never possible to read the chain later and
+                # believe the checkpoint was enforcing when it was not.
+                "mode": self.mode.value,
             }
         )
 
         if decision.verdict is not Verdict.ALLOW:
-            self._account_for_denial(decision, mandate)
-            return ExecutionResult(
-                decision=decision,
-                executed=False,
-                audit_seq=record.seq,
-                audit_hash=record.hash,
-                provenance=provenance,
+            if self.mode.enforcing:
+                self._account_for_denial(decision, mandate)
+                return ExecutionResult(
+                    decision=decision,
+                    executed=False,
+                    audit_seq=record.seq,
+                    audit_hash=record.hash,
+                    provenance=provenance,
+                    mode=self.mode,
+                )
+            # Observing. The refusal is computed and recorded, and then not acted on --
+            # the point of a shadow deployment is that nothing changes while the operator
+            # finds out what enforcement would have cost.
+            #
+            # The circuit breaker is deliberately not advanced. Withdrawing a session's
+            # authority is an enforcement action, and there is no retry loop to bound when
+            # nothing is being refused.
+            self._write(
+                {
+                    "kind": "observed",
+                    "request_id": request.request_id,
+                    "check_id": decision.check_id,
+                    "verdict": decision.verdict.value,
+                    "amount": request.effective_amount,
+                    "detail": (
+                        f"{decision.check_id} would have stopped this request in enforce "
+                        f"mode; the mode is observe, so it was allowed through"
+                    ),
+                }
             )
 
         if decision.replayed:
             # The gate already resolved this as a duplicate. Calling the rail again would
             # be the exact double-charge idempotency exists to prevent.
+            #
+            # This is checked in *both* modes, and the ordering is what makes that true: a
+            # replay is an ALLOW, so it never reaches the suppression above. Declining to
+            # enforce an authority check means not stopping what would have happened
+            # anyway. Declining to enforce idempotency would mean issuing a second payment
+            # this checkpoint had already made -- that is not observation, it is damage.
             return ExecutionResult(
                 decision=decision,
                 executed=False,
                 audit_seq=record.seq,
                 audit_hash=record.hash,
                 provenance=provenance,
+                mode=self.mode,
             )
 
-        return self._act(request, mandate, decision, record.seq, record.hash, provenance)
+        return self._act(
+            request,
+            mandate,
+            decision,
+            record.seq,
+            record.hash,
+            provenance,
+            suppressed=decision.verdict is not Verdict.ALLOW,
+        )
 
     # ---------------------------------------------------------------- internals
     def _act(
@@ -185,6 +238,8 @@ class PayNaka:
         audit_seq: int,
         audit_hash: str,
         provenance: dict[str, Any],
+        *,
+        suppressed: bool = False,
     ) -> ExecutionResult:
         key = request.idempotency_key or f"auto_{uuid.uuid4().hex}"
         try:
@@ -201,6 +256,8 @@ class PayNaka:
                 audit_seq=audit_seq,
                 audit_hash=audit_hash,
                 provenance=provenance,
+                mode=self.mode,
+                suppressed=suppressed,
             )
         except RailError as exc:
             # Outcome unknown. Deliberately not recorded as a failure: the money may have
@@ -218,6 +275,8 @@ class PayNaka:
                 audit_seq=audit_seq,
                 audit_hash=audit_hash,
                 provenance=provenance,
+                mode=self.mode,
+                suppressed=suppressed,
             )
 
         self._post(request, result)
@@ -237,6 +296,8 @@ class PayNaka:
             audit_seq=settled.seq,
             audit_hash=settled.hash,
             provenance=provenance,
+            mode=self.mode,
+            suppressed=suppressed,
         )
 
     def _account_for_denial(self, decision: GateDecision, mandate: IntentMandate) -> None:
@@ -411,6 +472,15 @@ class PayNaka:
     def _record_rejection(
         self, request: MoneyRequest, reason: str, provenance: dict[str, Any]
     ) -> ExecutionResult:
+        """A mandate whose signature does not verify. Refused in **both** modes.
+
+        Observe mode declines to enforce authority judgments about authenticated requests.
+        It does not decline to authenticate. An unverifiable mandate is not a request the
+        checkpoint is being strict about -- it is a request whose stated authority is
+        unattributable, and acting on it would mean executing whatever an attacker put in
+        the payload. There is no "what would have happened anyway" to preserve, because
+        without this checkpoint there would be no mandate at all.
+        """
         decision = GateDecision(
             verdict=Verdict.DENY,
             action=request.action,
@@ -426,6 +496,7 @@ class PayNaka:
                 "decision": decision.to_dict(),
                 "mandate": None,
                 "provenance": provenance,
+                "mode": self.mode.value,
             }
         )
         return ExecutionResult(
@@ -434,6 +505,7 @@ class PayNaka:
             audit_seq=record.seq,
             audit_hash=record.hash,
             provenance=provenance,
+            mode=self.mode,
         )
 
 

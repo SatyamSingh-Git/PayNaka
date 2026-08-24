@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1434 tests" src="https://img.shields.io/badge/tests-1434-2F6B4F?style=flat-square">
-  <img alt="996 adversarial" src="https://img.shields.io/badge/adversarial-996-2F6B4F?style=flat-square">
+  <img alt="1507 tests" src="https://img.shields.io/badge/tests-1507-2F6B4F?style=flat-square">
+  <img alt="1028 adversarial" src="https://img.shields.io/badge/adversarial-1028-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -100,6 +100,41 @@ records, because *which agent asked* is an audit question a session id does not 
 With nothing configured the service mints a development credential rather than admitting
 everyone — the check stays live, only the origin of the credential changes — and with a
 real rail configured it refuses to start without one.
+
+## Adoption: enforce, or observe first
+
+Nobody puts an enforcing gate in front of live payment traffic on the strength of a README.
+So there are two modes, and the second one is how this gets adopted rather than admired:
+
+```bash
+PAYNAKA_MODE=observe      # decide, record, and let it through anyway
+```
+
+Every check runs. Every decision is computed and audited. Nothing is stopped. After a week
+beside production, `GET /api/shadow` is not an argument, it is a list:
+
+```
+mode          observe
+decisions     8,412
+would block      37   (0.44%)
+money at risk   ₹4,21,300
+top check     envelope.price_moved
+```
+
+Then the merchant decides, having seen the cost of enforcement before paying it.
+
+Two things keep that from being a hole. **The mode is on every audit record**, so it is
+never possible to read the chain later and believe the checkpoint was enforcing when it was
+not — an operator who thinks they are protected and is not is the failure this design fears
+most. And **observe mode withholds authority judgments, not correctness**: signature
+verification and idempotency stay live in both modes. Declining to enforce an authority
+check means not stopping what would have happened anyway. Declining to enforce idempotency
+would mean issuing a second payment the checkpoint had already made itself, and declining to
+authenticate would mean executing whatever an attacker put in the payload. The first is
+observation; the other two are damage.
+
+`enforce` is the default, and a typo in the mode is a startup failure rather than a silent
+fallback — one of the two values enforces nothing.
 
 ## The demo
 
@@ -372,7 +407,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,434 tests, of which **996 are adversarial**. 88% branch coverage on `paynaka/`,
+1,507 tests, of which **1,028 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

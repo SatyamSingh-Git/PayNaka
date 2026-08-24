@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from merchant.app import reset_catalog
 from paynaka.app import AUTHORISED, GIFT, app, hub
 from paynaka.identity import TokenRegistry
+from paynaka.mode import Mode
 
 pytestmark = pytest.mark.integration
 
@@ -219,6 +220,45 @@ class TestTheAskingSurfaceIsAuthenticated:
         calls = [e for e in client.get("/api/events").json()["events"] if e["kind"] == "mcp.call"]
         assert calls and calls[-1]["caller"] == "integration-test"
         assert AGENT_TOKEN not in str(calls)
+
+
+class TestTheModeIsVisibleOverHttp:
+    """An operator who believes they are protected and is not is the failure the mode
+    reporting exists to prevent, so it must be legible without reading a config file."""
+
+    def test_health_names_the_mode(self, client: TestClient) -> None:
+        body = client.get("/api/health").json()
+        assert body["mode"] == "enforce"
+        assert body["enforcing"] is True
+
+    def test_the_shadow_report_is_zeroed_when_enforcing(self, client: TestClient) -> None:
+        """A zeroed report is the correct answer to "what did you let through": nothing."""
+        client.post("/api/demo/attack")
+        body = client.get("/api/shadow").json()
+        assert body["enforcing"] is True
+        assert body["observed"] == 0
+        assert body["money_at_risk"] == 0
+
+    def test_the_same_attack_observed_reports_what_it_let_through(self, client: TestClient) -> None:
+        """The adoption pitch, over HTTP: run it for a week, read what it would have
+        stopped, then decide whether to enforce."""
+        hub.naka.mode = Mode.OBSERVE
+        try:
+            client.post("/api/demo/attack")
+            body = client.get("/api/shadow").json()
+        finally:
+            hub.naka.mode = Mode.ENFORCE
+
+        assert body["observed"] >= 1
+        assert body["money_at_risk"] > 0
+        assert body["top_check"] == "envelope.item_not_in_intent"
+        assert body["money_at_risk_formatted"].startswith("₹")
+
+    def test_the_report_survives_a_run_with_nothing_to_report(self, client: TestClient) -> None:
+        body = client.get("/api/shadow").json()
+        assert body["observed"] == 0
+        assert body["top_check"] is None
+        assert body["rate"] == 0
 
 
 class TestPolicySurface:

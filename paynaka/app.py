@@ -38,6 +38,7 @@ from paynaka.engine import PayNaka
 from paynaka.env import load_env
 from paynaka.identity import Caller, TokenRegistry, Unauthenticated
 from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
+from paynaka.mode import Mode, shadow_report
 from paynaka.money import format_inr
 from paynaka.policy import Policy
 from paynaka.proxy.mcp import McpProxy
@@ -82,6 +83,8 @@ class Hub:
         # the simulated rail this mints a development credential; in front of a real rail
         # it refuses, and the service does not come up.
         self.callers = TokenRegistry.from_env()
+        # Enforce unless the operator asked for otherwise, and fail to start on a typo.
+        self.mode = Mode.from_env()
         self.state = SqliteState(":memory:", clock=self.clock)
         self.audit = AuditChain(":memory:", clock=self.clock)
         self.policy = Policy.from_yaml("policy.yaml")
@@ -92,6 +95,7 @@ class Hub:
             audit=self.audit,
             verifier=self.signer.verifier(),
             clock=self.clock,
+            mode=self.mode,
         )
         self.proxy = McpProxy(self.naka)
         self.events.clear()
@@ -207,6 +211,10 @@ async def mcp(request: Request) -> dict[str, Any] | None:
 def health() -> dict[str, Any]:
     return {
         "status": "ok",
+        # First-class, not buried. An operator who thinks they are protected and is not is
+        # the failure this field exists to prevent.
+        "mode": hub.mode.value,
+        "enforcing": hub.mode.enforcing,
         "rail": hub.naka.rail.name,
         "env": os.environ.get("PAYNAKA_ENV", "sandbox"),
         "test_mode": True,
@@ -276,6 +284,29 @@ def audit_verify() -> dict[str, Any]:
             "kind": broken.kind,
             "expected": broken.expected,
             "found": broken.found,
+        },
+    }
+
+
+@app.get("/api/shadow")
+def shadow() -> dict[str, Any]:
+    """What enforcement would have changed, counted from the chain.
+
+    The deliverable of a shadow deployment. Read from the audit records rather than from a
+    running tally, so it cannot drift from what the chain says -- if the chain verifies,
+    this is what happened.
+
+    Available in either mode on purpose. In enforce mode every number is zero, and a
+    zeroed report is the correct answer to "what did you let through": nothing.
+    """
+    report = shadow_report(record.payload for record in hub.audit.records())
+    return {
+        "mode": hub.mode.value,
+        "enforcing": hub.mode.enforcing,
+        **report.to_dict(),
+        "money_at_risk_formatted": format_inr(report.money_at_risk),
+        "by_check_amount_formatted": {
+            check: format_inr(amount) for check, amount in sorted(report.by_check_amount.items())
         },
     }
 

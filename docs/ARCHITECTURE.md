@@ -56,6 +56,7 @@ That is the difference between "we made it harder" and "the action is not availa
 | `paynaka/audit.py` | append-only hash chain | `verify()` names the exact broken record |
 | `paynaka/engine.py` | the only path to a rail | audits the decision *before* calling out |
 | `paynaka/identity.py` | who may ask | no unauthenticated path, not even in development |
+| `paynaka/mode.py` | enforce or observe | the mode is on every audit record, never inferred |
 | `paynaka/proxy/mcp.py` | Razorpay-compatible MCP server | fails closed without a mandate |
 | `paynaka/rails/` | sim + Razorpay test mode | refuses any key that is not `rzp_test_` |
 
