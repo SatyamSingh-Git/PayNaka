@@ -24,23 +24,45 @@
   <a href="#quickstart"><b>Run it</b></a> ·
   <a href="#a-real-razorpay-payment-gated"><b>Real Razorpay evidence</b></a> ·
   <a href="#the-four-defences-over-the-attacks-that-land"><b>The comparison</b></a> ·
+  <a href="#glossary"><b>Glossary</b></a> ·
   <a href="docs/THREATMODEL.md"><b>What it does not defend</b></a>
 </p>
 
-> **In one line.** A buying agent holds no payment credentials; it can only *ask*. PayNaka
-> answers with deterministic code — `gate.py` imports no LLM SDK, and a test fails the build
-> if that changes.
->
+## What this is, in plain words
+
+AI agents are starting to shop and pay on people's behalf. To let one do that, somebody has
+to give it access to money.
+
+The obvious way is to hand it a payment key — the software equivalent of giving an assistant
+your credit card. It works, right up until somebody talks the assistant into using it for
+something you never asked for. And an AI can be talked into things: it reads text from the
+internet, and text from the internet can contain instructions.
+
+**PayNaka is the other way.** The agent gets no card. Before it starts shopping, you sign a
+short, specific statement of what you want:
+
+> one 5kg bag of atta · at most ₹1,999 · delivered to my home address · valid for 15 minutes
+
+The agent can *ask* for money to move. PayNaka checks the request against that signed
+statement and either allows it or refuses, in plain arithmetic — no AI involved in the
+decision. Ask for a ₹50,000 gift card and it is refused, no matter how convincingly the
+agent was persuaded to ask.
+
+That is the whole idea. The name is Hindi: **पे-नाका**, a checkpoint on the road, where every
+vehicle is stopped and its papers are checked.
+
 > **What it does not claim.** Prompt injection is not solved. PayNaka does not stop an agent
-> being persuaded; it stops a persuaded agent moving money outside its mandate. Those are
-> different claims and only the second is made here.
+> being *persuaded* — nobody can promise that. It stops a persuaded agent *moving money*
+> outside what you signed. Those are different claims and only the second is made here.
 
 ---
 
 ## The observation this is built on
 
-Razorpay's remote MCP server exposes about forty tools to any AI agent. Every read path is open.
-Four are switched off — among them `create_refund` and `create_instant_settlement`.
+Razorpay publishes an **MCP server** — a standard way for an AI agent to call somebody's API
+directly, the way a person would click buttons in a dashboard. It exposes about forty tools to
+any agent. Every read path is open. Four are switched off — among them `create_refund` and
+`create_instant_settlement`.
 
 That is not an oversight. It is a trust boundary drawn by hand, by engineers who understood the
 risk and had no mechanism to manage it. It is an admission: *we cannot currently let an autonomous
@@ -805,6 +827,30 @@ with the chain; when they disagree the counter is wrong, so it should not exist.
 - **What this does not claim.** Prompt injection is not solved. An agent can still be steered into
   bad-but-authorised choices — a worse product inside budget is still a loss. See
   [THREATMODEL.md](docs/THREATMODEL.md).
+
+## Glossary
+
+Every term this README uses that is not ordinary English, in the order you meet them.
+
+| Term | What it means here |
+| --- | --- |
+| **agent** | an AI given a goal and the ability to act — search, add to cart, pay — rather than only to answer |
+| **MCP** | Model Context Protocol. A standard way for an AI agent to call somebody's API directly |
+| **prompt injection** | text that an AI reads as an instruction when it was only meant to be data. The poisoned review above |
+| **mandate** | the signed statement of what the shopper wants. The papers the checkpoint checks |
+| **envelope** | the set of limits inside that mandate: budget, allowed items, quantity, destination, expiry |
+| **the gate** | the code that compares one request against one mandate and answers ALLOW, DENY or STEP_UP. Contains no AI |
+| **step-up** | "a person must approve this before it happens". Nobody approves in time → DENY |
+| **rail** | whatever actually moves the money. Here: Razorpay's test API, or an offline simulator |
+| **paise** | ₹1 = 100 paise. Money is stored as whole paise, never as a decimal — 0.1 + 0.2 is not 0.3 in a computer |
+| **nonce** | a number used once. Stops the same authorisation being replayed |
+| **idempotency key** | a label on a request meaning "if you have seen this before, do not do it twice" |
+| **TOCTOU** | *time-of-check to time-of-use*: the price you read is not the price you pay, because it changed in between |
+| **webhook** | the payment provider calling *you* to say what happened. Can arrive twice, late, or out of order |
+| **HMAC** | a signature proving a message came from someone holding a shared secret. How a webhook is verified |
+| **audit chain** | a log where each entry contains a hash of the one before, so editing history is detectable |
+| **held-out set** | test cases deliberately never looked at while building, so the score on them is honest |
+| **fail closed** | when in doubt, refuse. The opposite — fail open — is how systems leak money |
 
 ## Documentation
 
