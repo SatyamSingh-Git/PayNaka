@@ -106,6 +106,10 @@ toctou: ## price changes between reading it and paying it. no model, no keys.
 toctou-probe: ## cents: do real agents notice the price changed? (needs a model key)
 	$(PY) python -m scripts.probe_toctou
 
+.PHONY: latency
+latency: ## what the checkpoint costs. no model, no keys, no network.
+	$(PY) python -m haat.latency
+
 .PHONY: chaos
 chaos: ## duplicate, reordered and lost webhooks. no model, no keys, no network.
 	$(PY) python -m chaos.runner

@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1507 tests" src="https://img.shields.io/badge/tests-1507-2F6B4F?style=flat-square">
+  <img alt="1540 tests" src="https://img.shields.io/badge/tests-1540-2F6B4F?style=flat-square">
   <img alt="1028 adversarial" src="https://img.shields.io/badge/adversarial-1028-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
@@ -299,6 +299,35 @@ mean pairwise similarity 0.110, p95 0.357, max 0.951
 106 pairs above 0.90 cosine  -  106 same-seed, 0 cross-seed
 ```
 
+## What the checkpoint costs
+
+A defence nobody will deploy is not a defence, and "we have not measured what it adds to
+the money path" is a reason not to deploy. `make latency` — no model, no keys, no network:
+
+| Layer | p50 | p95 | **p99** | worst |
+| --- | ---: | ---: | ---: | ---: |
+| envelope checks — the mandate, no I/O | 6.1 µs | 6.3 µs | **10.3 µs** | 34.5 µs |
+| full gate — same checks, plus state reads | 747.9 µs | 877.9 µs | **1,006 µs** | 4,546 µs |
+| full enforced path — audit write and ledger included | 2.34 ms | 2.87 ms | **6.12 ms** | 23.6 ms |
+
+Against a 120 ms call to a hosted payments API, the whole enforced path is **4.9%** of the
+round trip.
+
+**The interesting number is the gap between the first two rows.** The checks the design
+actually claims — items, quantities, total, reference price, destination, currency — cost
+**ten microseconds** at p99. Everything else is the state store: revocation, the daily
+refund cap, the atomic balance claim. Almost all of a decision is SQLite, not deciding.
+
+That is the useful thing to know before adopting it. It says the checks are free and the
+question worth asking is about the state layer — which is also the honest answer to "will
+this survive a shared database": nobody knows yet, and the number that would change is
+already identified rather than buried.
+
+**Read it as a floor.** One machine, one thread, a frozen clock and a local rail. It
+measures the checkpoint's own work carefully and says nothing about behaviour under
+concurrent load. The reference figure is the *optimistic* end of a hosted API's range on
+purpose: a checkpoint that looks cheap only next to a slow network is not a result.
+
 ## It is not only about attackers
 
 An agent does not need an adversary to lose a merchant money. It needs a duplicate webhook.
@@ -345,13 +374,14 @@ uv sync --all-extras
 make check                    # lint · types · tests · secret scan
 ```
 
-**These four need no keys, no network, and no model.** They are the demonstrations, and
+**These five need no keys, no network, and no model.** They are the demonstrations, and
 every number in this README above came out of them:
 
 ```bash
 make toctou                   # the price changes between reading it and paying it
 make chaos                    # six ways a gateway loses money with nobody attacking
 make sentinel                 # the detector, with its false-positive rate and margin
+make latency                  # what the checkpoint costs, decomposed by layer
 make demo-attack              # poisoned catalog, checkpoint off then on
 ```
 
@@ -407,7 +437,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,507 tests, of which **1,028 are adversarial**. 88% branch coverage on `paynaka/`,
+1,540 tests, of which **1,028 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?
