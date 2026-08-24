@@ -20,17 +20,20 @@ import {
   BarChartIcon,
   HistoryIcon,
   SettingsIcon,
+  CheckCircleIcon,
 } from '@razorpay/blade/components';
 import { api, type Health } from './api';
 import { Live } from './screens/Live';
 import { Benchmark } from './screens/Benchmark';
 import { Replay } from './screens/Replay';
 import { Policy } from './screens/Policy';
+import { Operations } from './screens/Operations';
 
-type ScreenId = 'live' | 'benchmark' | 'replay' | 'policy';
+type ScreenId = 'live' | 'operations' | 'benchmark' | 'replay' | 'policy';
 
 const NAV_ITEMS = [
   { href: '#live', title: 'Live', icon: ActivityIcon },
+  { href: '#operations', title: 'Operations', icon: CheckCircleIcon },
   { href: '#benchmark', title: 'Benchmark', icon: BarChartIcon },
   { href: '#replay', title: 'Replay', icon: HistoryIcon },
   { href: '#policy', title: 'Policy', icon: SettingsIcon },
@@ -116,6 +119,7 @@ export function App({
 
       <Box flex="1" padding={{ base: 'spacing.5', m: 'spacing.7' }} maxWidth="1440px" width="100%" margin="auto">
         {screen === 'live' && <Live />}
+        {screen === 'operations' && <Operations />}
         {screen === 'benchmark' && <Benchmark />}
         {screen === 'replay' && <Replay />}
         {screen === 'policy' && <Policy />}

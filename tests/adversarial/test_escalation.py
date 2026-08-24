@@ -376,16 +376,39 @@ class TestTheAgentCannotApproveItself:
             approvers.authenticate(f"Bearer {agent_token}")
         assert approvers.authenticate(f"Bearer {approver_token}").name == "ops"
 
-    def test_with_no_approvers_configured_nobody_can_approve(
+    def test_with_nothing_configured_in_front_of_a_real_rail_nobody_can_approve(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Fail closed: every step-up then runs out its window, which is what
-        "unanswered" is supposed to mean."""
+        """Fail closed where it matters: every step-up then runs out its window, which is
+        what "unanswered" is supposed to mean."""
         monkeypatch.delenv("PAYNAKA_APPROVER_TOKENS", raising=False)
+        monkeypatch.setenv("PAYNAKA_RAIL", "test")
         approvers = load_approvers(TokenRegistry({"buyer": "a" * 40}))
         assert len(approvers) == 0
         with pytest.raises(Exception, match="no valid bearer"):
             approvers.authenticate("Bearer " + "a" * 40)
+
+    def test_in_front_of_the_simulator_a_dev_approver_is_minted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same reasoning as the dev agent credential: the check stays live and only the
+        origin of the credential moves. Without this the console cannot approve anything,
+        and the tempting fix would have been to let it approve without one."""
+        monkeypatch.delenv("PAYNAKA_APPROVER_TOKENS", raising=False)
+        monkeypatch.setenv("PAYNAKA_RAIL", "sim")
+        approvers = load_approvers(TokenRegistry({"buyer": "a" * 40}))
+        assert approvers.names == ("dev-approver",)
+
+    def test_the_minted_approver_still_refuses_the_agent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The property that must survive the convenience."""
+        monkeypatch.delenv("PAYNAKA_APPROVER_TOKENS", raising=False)
+        monkeypatch.setenv("PAYNAKA_RAIL", "sim")
+        agent_token = "a" * 40
+        approvers = load_approvers(TokenRegistry({"buyer": agent_token}))
+        with pytest.raises(Exception, match="no valid bearer"):
+            approvers.authenticate(f"Bearer {agent_token}")
 
 
 # ============================================================== the record

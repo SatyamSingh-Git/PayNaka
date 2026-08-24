@@ -75,6 +75,66 @@ export interface Health {
   test_mode: boolean;
   merchant: string;
   audit_records: number;
+  mode: 'enforce' | 'observe';
+  enforcing: boolean;
+}
+
+/** A money action waiting for a person. Approving releases exactly one request, once. */
+export interface Escalation {
+  id: string;
+  request_hash: string;
+  session_id: string;
+  subject: string;
+  action: string;
+  amount: number;
+  amount_formatted: string;
+  summary: Record<string, unknown>;
+  created_at: number;
+  expires_at: number;
+  state: 'pending' | 'approved' | 'denied' | 'consumed';
+  decided_by: string | null;
+}
+
+export interface EscalationQueue {
+  timeout_seconds: number;
+  on_timeout: string;
+  approvers_configured: number;
+  pending: Escalation[];
+  expired: Escalation[];
+}
+
+/** What enforcement would have changed. Every number zero unless the mode is observe. */
+export interface ShadowReport {
+  mode: 'enforce' | 'observe';
+  enforcing: boolean;
+  decisions: number;
+  observed: number;
+  money_at_risk: number;
+  money_at_risk_formatted: string;
+  rate: number;
+  top_check: string | null;
+  by_check: Record<string, number>;
+  by_check_amount_formatted: Record<string, string>;
+}
+
+export interface Metrics {
+  decisions: number;
+  allowed: number;
+  denied: number;
+  stepped_up: number;
+  replayed: number;
+  executed: number;
+  money_moved: number;
+  money_moved_formatted: string;
+  by_check: Record<string, number>;
+  breaker_trips: number;
+  escalations_opened: number;
+  escalations_approved: number;
+  escalations_denied: number;
+  observed_suppressions: number;
+  chain_records: number;
+  chain_intact: boolean;
+  mode: 'enforce' | 'observe';
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -83,11 +143,24 @@ async function get<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function post<T>(path: string): Promise<T> {
-  const response = await fetch(path, { method: 'POST' });
+async function post<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, { method: 'POST', ...init });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return (await response.json()) as T;
 }
+
+/**
+ * The approver credential, which is deliberately NOT the agent's.
+ *
+ * A step-up the buying agent can answer on its own behalf is theatre, so the service keeps
+ * two separate credential sets and refuses to start if a token appears in both. `make dev`
+ * passes the development one it minted; without it the approve button gets an honest 401
+ * rather than a silent success.
+ */
+const APPROVER_TOKEN = (import.meta.env.VITE_PAYNAKA_APPROVER_TOKEN as string | undefined) ?? '';
+
+const approverHeaders = (): HeadersInit =>
+  APPROVER_TOKEN ? { Authorization: `Bearer ${APPROVER_TOKEN}` } : {};
 
 export const api = {
   health: () => get<Health>('/api/health'),
@@ -98,6 +171,12 @@ export const api = {
     get<{ intact: boolean; records: number; head: string; break: unknown }>('/api/audit/verify'),
   runDemo: (scenario: 'happy' | 'attack', gate: boolean) =>
     post<DemoRun>(`/api/demo/${scenario}?gate=${gate}`),
+  escalations: () => get<EscalationQueue>('/api/escalations'),
+  decide: (id: string, answer: 'approve' | 'deny') =>
+    post<Escalation>(`/api/escalations/${id}/${answer}`, { headers: approverHeaders() }),
+  shadow: () => get<ShadowReport>('/api/shadow'),
+  metrics: () => get<Metrics>('/api/metrics'),
+  hasApproverCredential: () => APPROVER_TOKEN.length > 0,
 };
 
 /** Paise -> "₹1,999.00", with Indian lakh/crore grouping. */

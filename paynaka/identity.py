@@ -60,6 +60,10 @@ MIN_TOKEN_LENGTH: Final[int] = 24
 # the name. Renaming it to dodge the linter would obscure what the file holds.
 DEV_TOKEN_PATH: Final[str] = "var/dev-agent-token"  # noqa: S105
 
+#: The development approver credential. A separate file because it is a separate
+#: credential -- the whole point is that the agent cannot answer its own step-up.
+DEV_APPROVER_PATH: Final[str] = "var/dev-approver-token"
+
 _ENV_VAR: Final[str] = "PAYNAKA_AGENT_TOKENS"
 _APPROVER_ENV_VAR: Final[str] = "PAYNAKA_APPROVER_TOKENS"
 
@@ -271,7 +275,16 @@ def load_approvers(agents: TokenRegistry) -> TokenRegistry:
     the fail-closed direction, and it is what "unanswered" is supposed to mean.
     """
     raw = os.environ.get(_APPROVER_ENV_VAR, "").strip()
-    approvers = TokenRegistry(_parse_entries(raw, var=_APPROVER_ENV_VAR) if raw else {})
+    if raw:
+        approvers = TokenRegistry(_parse_entries(raw, var=_APPROVER_ENV_VAR))
+    elif (os.environ.get("PAYNAKA_RAIL", "sim").strip().lower()) == "sim":
+        # In front of the simulator, mint one rather than leaving the console unable to
+        # approve anything. Same reasoning as the dev agent credential: the check stays
+        # live and only the origin of the credential changes. A real rail still gets an
+        # empty registry, so an unconfigured production deployment approves nothing.
+        approvers = TokenRegistry({"dev-approver": load_or_create_dev_token(DEV_APPROVER_PATH)})
+    else:
+        approvers = TokenRegistry({})
 
     shared = set(agents.names) & set(approvers.names)
     if shared:

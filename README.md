@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2003 tests" src="https://img.shields.io/badge/tests-2003-2F6B4F?style=flat-square">
-  <img alt="1280 adversarial" src="https://img.shields.io/badge/adversarial-1280-2F6B4F?style=flat-square">
+  <img alt="2005 tests" src="https://img.shields.io/badge/tests-2005-2F6B4F?style=flat-square">
+  <img alt="1282 adversarial" src="https://img.shields.io/badge/adversarial-1282-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -602,7 +602,7 @@ real Razorpay test-mode API.
 It is built on [`@razorpay/blade`](https://github.com/razorpay/blade), Razorpay's own
 MIT-licensed design system, the one that powers razorpay.com. So it does not merely
 resemble a Razorpay product: it is assembled from the same components and ships their
-brand faces. Four screens: **Live** (the demo), **Benchmark** (what has actually been
+brand faces. Five screens: **Live** (the demo), **Operations** (the approval queue, the shadow report and the metrics that matter), **Benchmark** (what has actually been
 measured — the price-mutation table, the webhook scenarios, the detector with its margin,
 and an honest empty state where the injection sweep would go), **Replay** (the audit
 chain, with a button that rehashes it), and **Policy** (the envelope, and Indian payments
@@ -615,7 +615,7 @@ verifies is worse than none.
 
 ## Testing
 
-2,003 tests, of which **1,280 are adversarial**. 88% branch coverage on `paynaka/`,
+2,005 tests, of which **1,282 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

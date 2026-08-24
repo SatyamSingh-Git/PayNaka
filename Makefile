@@ -56,7 +56,7 @@ check: lint types test secrets ## everything CI runs
 
 # ------------------------------------------------------------------ run
 .PHONY: dev
-dev: console-data ## merchant :8001 + paynaka :8002 + console :5173
+dev: console-data approver-token ## merchant :8001 + paynaka :8002 + console :5173
 	@echo "starting merchant :8001, paynaka :8002, console :5173"
 	@$(PY) uvicorn merchant.app:app --port 8001 --reload & \
 	 $(PY) uvicorn paynaka.app:app  --port 8002 --reload & \
@@ -138,3 +138,7 @@ audit-verify: ## recompute the hash chain, print first break
 clean: ## remove generated artifacts (never touches source)
 	rm -rf .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage haat/out var
 	find . -type d -name __pycache__ -not -path './.git/*' -exec rm -rf {} + 2>/dev/null || true
+
+.PHONY: approver-token
+approver-token: ## mint the dev approver credential and hand it to the console
+	@$(PY) python -m scripts.approver_token
