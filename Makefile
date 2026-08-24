@@ -71,6 +71,10 @@ naka: ## paynaka service only
 	$(PY) uvicorn paynaka.app:app --port 8002 --reload
 
 # ------------------------------------------------------------------ demos
+.PHONY: demo
+demo: ## THE ONE COMMAND. the whole argument, ~90s, no keys or network
+	$(PY) python -m scripts.demo
+
 .PHONY: demo-happy
 demo-happy: ## clean purchase, gate on
 	$(PY) python -m buyer.cli --scenario happy

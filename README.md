@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2005 tests" src="https://img.shields.io/badge/tests-2005-2F6B4F?style=flat-square">
+  <img alt="2015 tests" src="https://img.shields.io/badge/tests-2015-2F6B4F?style=flat-square">
   <img alt="1282 adversarial" src="https://img.shields.io/badge/adversarial-1282-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
@@ -552,8 +552,25 @@ uv sync --all-extras
 make check                    # lint · types · tests · secret scan
 ```
 
-**These five need no keys, no network, and no model.** They are the demonstrations, and
-every number in this README above came out of them:
+**One command, the whole argument, about ninety seconds:**
+
+```bash
+make demo
+```
+
+It runs the story in the order of the argument rather than the order things were built: the
+attack a smarter agent cannot avoid, then the attack with nobody attacking, then the
+injection everybody expects — reported with the measurement that says a real model mostly
+is not fooled by it. Then what the checkpoint costs.
+
+Or, with Docker and nothing else installed:
+
+```bash
+docker build -t paynaka . && docker run --rm paynaka
+```
+
+**These need no keys, no network, and no model either.** Every number in this README came
+out of them:
 
 ```bash
 make toctou                   # the price changes between reading it and paying it
@@ -615,7 +632,7 @@ verifies is worse than none.
 
 ## Testing
 
-2,005 tests, of which **1,282 are adversarial**. 88% branch coverage on `paynaka/`,
+2,015 tests, of which **1,282 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?
