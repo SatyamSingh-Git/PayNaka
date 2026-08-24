@@ -339,6 +339,23 @@ class SqliteState:
             raise StateError(f"idempotency key {key!r} neither inserted nor found")
         return IdempotencyRecord(*row)
 
+    def complete_idempotency(self, key: str, result_json: str) -> bool:
+        """Store what a claimed key actually produced. ``True`` if a row was updated.
+
+        The claim is taken *before* the rail is called -- it has to be, or two concurrent
+        copies of one request both find the key free -- so at claim time there is no result
+        to record and a placeholder goes in. Without this second half the placeholder was
+        all there ever was, and a retry after a timeout got back "nothing happened" about a
+        payment that had in fact been made.
+        """
+        if not key:
+            raise StateError("completing an idempotency record needs a key")
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE idempotency SET result_json = ? WHERE key = ?", (result_json, key)
+            )
+        return cursor.rowcount == 1
+
     def lookup_idempotency(self, key: str) -> IdempotencyRecord | None:
         with self._lock:
             row = self._conn.execute(

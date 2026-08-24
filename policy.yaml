@@ -38,11 +38,20 @@ actions:
 
 regulatory:
   timezone: Asia/Kolkata
-  npci_mandate_retries: 3          # NPCI: 3 retries (4 attempts) per cycle
-  debit_blackout: ["10:00-13:00"]  # NPCI: restricted peak window
-  contact_window: "08:00-19:00"    # RBI: collection contact hours
-  afa_threshold: 1500000           # RBI: Rs 15,000 additional-factor ceiling
-  pre_debit_notice_seconds: 86400  # RBI: 24h notice before a recurring debit
+  # EXAMPLE VALUES, NOT VERIFIED. These are realistic defaults so the time-and-limit
+  # machinery has something concrete to enforce. Every one of them has a narrower scope
+  # than a flat number suggests, and none has been checked against a primary source by
+  # this project. See docs/REGULATORY_BASIS.md before enabling any of them for real
+  # money -- particularly afa_threshold and contact_window, which were previously
+  # attributed to RBI more broadly than the source supports.
+  npci_mandate_retries: 3          # example: retries per cycle. Varies by mandate type.
+  debit_blackout: ["10:00-13:00"]  # example: an operational peak window, not statute
+  contact_window: "08:00-19:00"    # example: RBI states this for RECOVERY AGENTS, not
+                                   # general payment contact. Narrower than it looks.
+  afa_threshold: 1500000           # example: AFA thresholds are CATEGORY-SPECIFIC and
+                                   # have been revised. A flat number is not the rule.
+  pre_debit_notice_seconds: 86400  # example: notice windows and products in scope must
+                                   # be read off the current circular.
 
 escalation:
   channel: console

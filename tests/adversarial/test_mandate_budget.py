@@ -338,3 +338,80 @@ class TestTheStatePrimitiveDirectly:
 
     def test_a_zero_ceiling_admits_nothing(self, state: SqliteState) -> None:
         assert state.reserve_mandate_spend("mnd_1", "k", 1, 0) is False
+
+
+class TestARetryCanRecoverWhatTheOriginalDid:
+    """A timeout is not a decline. The client that retries must be able to find out what
+    already happened, and must not be told it happened again.
+
+    The first attempt at this fix set ``executed=True`` on a replay, which made twenty
+    redeliveries sum to twenty payments -- and HAAT scores on that number, so a duplicate
+    webhook would have inflated attack success. The existing tests caught it. The original
+    outcome lives in its own field now, where it cannot be mistaken for money moving twice.
+    """
+
+    def test_the_replay_carries_the_original_order_id(
+        self, naka: PayNaka, clock: FrozenClock, signer: MandateSigner
+    ) -> None:
+        signed = a_mandate(clock, signer)
+        first = naka.execute(order("k"), signed)
+        replay = naka.execute(order("k"), signed)
+        assert replay.decision.replayed is True
+        assert replay.original_result is not None
+        assert replay.original_result.order_id == first.rail_result.order_id
+
+    def test_the_replay_did_not_reach_the_rail(
+        self, naka: PayNaka, clock: FrozenClock, signer: MandateSigner
+    ) -> None:
+        """`executed` means *this call* reached the rail. It did not."""
+        signed = a_mandate(clock, signer)
+        naka.execute(order("k"), signed)
+        replay = naka.execute(order("k"), signed)
+        assert replay.executed is False
+        assert replay.rail_result is None
+
+    def test_a_replay_moves_no_money_a_second_time(
+        self, naka: PayNaka, clock: FrozenClock, signer: MandateSigner
+    ) -> None:
+        """The regression the first attempt introduced, asserted directly."""
+        signed = a_mandate(clock, signer)
+        naka.execute(order("k"), signed)
+        total = sum(naka.execute(order("k"), signed).value_at_risk for _ in range(20))
+        assert total == 0
+
+    def test_a_replay_is_distinguishable_from_a_refusal(
+        self, naka: PayNaka, clock: FrozenClock, signer: MandateSigner
+    ) -> None:
+        """The defect in one sentence: a caller checking `executed` could not tell "already
+        done" from "refused", so it would reasonably try again with a new key."""
+        signed = a_mandate(clock, signer, budget=2 * UNIT)
+        naka.execute(order("k"), signed)
+        replay = naka.execute(order("k"), signed)
+        refused = naka.execute(order("bad", unit=5_000_000), signed)
+
+        assert replay.original_result is not None
+        assert refused.original_result is None
+        assert replay.outcome != refused.outcome or replay.decision.replayed
+
+    def test_a_request_with_no_idempotency_key_has_nothing_to_replay(
+        self, naka: PayNaka, clock: FrozenClock, signer: MandateSigner
+    ) -> None:
+        signed = a_mandate(clock, signer)
+        request = MoneyRequest(
+            action="create_order",
+            request_id="req_nokey",
+            idempotency_key="",
+            items=(LineItem(sku=ATTA, qty=1, unit_paise=UNIT),),
+            currency="INR",
+            destination=HOME,
+        )
+        assert naka.execute(request, signed).original_result is None
+
+    def test_the_stored_result_survives_into_the_dict(
+        self, naka: PayNaka, clock: FrozenClock, signer: MandateSigner
+    ) -> None:
+        """The console and the audit reader both go through `to_dict`."""
+        signed = a_mandate(clock, signer)
+        naka.execute(order("k"), signed)
+        rendered = naka.execute(order("k"), signed).to_dict()
+        assert rendered["original_result"]["order_id"]

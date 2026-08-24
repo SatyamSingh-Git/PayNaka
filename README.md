@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2090 tests" src="https://img.shields.io/badge/tests-2090-2F6B4F?style=flat-square">
-  <img alt="1332 adversarial" src="https://img.shields.io/badge/adversarial-1332-2F6B4F?style=flat-square">
+  <img alt="2096 tests" src="https://img.shields.io/badge/tests-2096-2F6B4F?style=flat-square">
+  <img alt="1338 adversarial" src="https://img.shields.io/badge/adversarial-1338-2F6B4F?style=flat-square">
   <img alt="coverage 92%" src="https://img.shields.io/badge/coverage-92%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -89,8 +89,16 @@ PayNaka speaks MCP on both sides. Point any existing agent at it instead of `mcp
   }
 ```
 
-One URL and one header. No SDK, no rewrite, no change to the agent's *code* — same tool
-names, same schemas.
+One URL and one header. No SDK, no rewrite, no change to the agent's *code*.
+
+That is true of the five tools proxied here, and it is **not** a claim of general
+compatibility — the README said "same tool names, same schemas" and that overstated it.
+Razorpay's own MCP server publishes 35+ tools; this proxies five, stubs one of them, and
+requires an extra `notes.paynaka_items` field on money-moving calls because the mandate
+checks line items and the upstream order schema has nowhere to put them.
+[docs/MCP_COMPATIBILITY.md](docs/MCP_COMPATIBILITY.md) is the matrix, including every place
+an agent written against the real server would behave differently here. The argument does
+not need a large tool count, and inflating one would weaken it.
 
 The header is not optional, and that is the point. "The agent holds no payment
 credentials" buys nothing while the surface it asks through is open to anything that can
@@ -736,7 +744,7 @@ verifies is worse than none.
 
 ## Testing
 
-2,090 tests, of which **1,332 are adversarial**. 92% branch coverage on `paynaka/`,
+2,096 tests, of which **1,338 are adversarial**. 92% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

@@ -13,7 +13,7 @@ policy cannot open a hole, only close one further.
 
 **Pure functions.** Every check is a function of ``(request, mandate, state, policy,
 clock)``. Nothing reads the wall clock, the environment, or a global. That is what makes
-the RBI and NPCI time-window rules testable without waiting until 7pm.
+the configured time-window rules testable without waiting until 7pm.
 
 **Idempotency replays rather than denies.** A duplicate webhook is not an attack, it is
 Tuesday. Re-presenting an identical request returns the original result instead of moving
@@ -501,7 +501,7 @@ def check_regulatory(
         if used >= reg.npci_mandate_retries:
             return _deny(
                 "regulatory.retry_cap",
-                f"NPCI permits {reg.npci_mandate_retries} retries per cycle; {used} already used",
+                f"policy permits {reg.npci_mandate_retries} retries per cycle; {used} already used",
                 used=used,
                 cap=reg.npci_mandate_retries,
             )
@@ -511,7 +511,7 @@ def check_regulatory(
             if notice is None:
                 return _deny(
                     "regulatory.no_pre_debit_notice",
-                    "RBI requires advance notice before a recurring debit; none was recorded",
+                    "policy requires advance notice before a recurring debit; none was recorded",
                 )
             elapsed = clock.epoch() - notice
             if elapsed < reg.pre_debit_notice_seconds:

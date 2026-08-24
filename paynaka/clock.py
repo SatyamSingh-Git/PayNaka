@@ -1,7 +1,11 @@
 """An injectable clock.
 
-PayNaka encodes real Indian payments regulation that is expressed in wall-clock terms:
-RBI's 08:00-19:00 collection-contact window, NPCI's 10:00-13:00 debit blackout. Rules
+PayNaka encodes rules that are expressed in wall-clock terms -- a contact window, a debit
+blackout -- with Indian payments as the worked example. The *values* are configurable
+policy examples rather than verified law; see docs/REGULATORY_BASIS.md, which exists
+because this docstring used to say "real Indian payments regulation" and that claimed more
+than the project had checked. What is real here is the machinery: IST correctness, an
+injectable clock, and windows that wrap midnight. Rules
 like these are untestable if the code reaches for ``datetime.now()``, so it never does --
 every check that cares about time takes a ``Clock``.
 

@@ -23,10 +23,11 @@ Those differ on partial capture, and trusting the request is how a ledger drifts
 
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import asdict, dataclass, field
+from typing import Any, ClassVar
 
 from paynaka.anchor import AnchorLog, Notary, rail_note
 from paynaka.audit import GENESIS, AuditChain, AuditRecord
@@ -55,6 +56,33 @@ __all__ = ["ExecutionResult", "PayNaka"]
 
 
 @dataclass(frozen=True, slots=True)
+class ReplayedResult:
+    """The original rail outcome, reconstructed from what was stored at the time.
+
+    Deliberately not the rail's own result type. It is a *record* of what a rail returned,
+    read back later, and giving it the same class would invite code to treat a reconstruction
+    as though the call had just been made.
+
+    It carries the fields the ledger and the console read, which is what `_describe_result`
+    already chose to persist.
+    """
+
+    FIELDS: ClassVar[tuple[str, ...]] = (
+        "order_id",
+        "payment_id",
+        "refund_id",
+        "amount",
+        "status",
+    )
+
+    order_id: str | None = None
+    payment_id: str | None = None
+    refund_id: str | None = None
+    amount: int | None = None
+    status: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionResult:
     """What happened, in enough detail for the console and the audit log."""
 
@@ -71,6 +99,10 @@ class ExecutionResult:
     #: A refusal that was computed and then not acted on, because the mode is ``observe``.
     #: This is the field a shadow-mode report counts.
     suppressed: bool = False
+    #: What the *original* call produced, when this one is a replay of it. Separate from
+    #: ``rail_result`` on purpose: this call did not reach the rail, and a caller must be
+    #: able to recover the order it already created without that reading as a second one.
+    original_result: ReplayedResult | None = None
 
     @property
     def outcome(self) -> str:
@@ -132,6 +164,11 @@ class ExecutionResult:
             "decision": self.decision.to_dict(),
             "executed": self.executed,
             "outcome": self.outcome,
+            **(
+                {"original_result": asdict(self.original_result)}
+                if self.original_result is not None
+                else {}
+            ),
             "value_at_risk": self.value_at_risk,
             "captured_paise": self.captured_paise,
             # Kept for readers of older evidence files. Equal to value_at_risk.
@@ -272,9 +309,21 @@ class PayNaka:
             # enforce an authority check means not stopping what would have happened
             # anyway. Declining to enforce idempotency would mean issuing a second payment
             # this checkpoint had already made -- that is not observation, it is damage.
+            # The original result, handed back. Without this a retry returned
+            # `executed=False` with no rail result -- indistinguishable, to any caller that
+            # checks those, from a refusal. A client that timed out and retried was told
+            # nothing had happened about an order that existed, and the order id was gone.
+            # That is the failure idempotency is supposed to *be* the answer to.
             return ExecutionResult(
                 decision=decision,
+                # Still False, and that is not a compromise. `executed` means *this call
+                # reached the rail*, and it did not. Setting it True made twenty
+                # redeliveries sum to twenty payments -- HAAT scores on that number, so a
+                # duplicate webhook would have inflated attack success. The original
+                # outcome goes in its own field instead, where it cannot be mistaken for
+                # money moving a second time.
                 executed=False,
+                original_result=self._replayed_result(request),
                 audit_seq=record.seq,
                 audit_hash=record.hash,
                 provenance=provenance,
@@ -290,6 +339,27 @@ class PayNaka:
             provenance,
             suppressed=decision.verdict is not Verdict.ALLOW,
         )
+
+    def _replayed_result(self, request: MoneyRequest) -> ReplayedResult | None:
+        """The stored outcome of the original call, or ``None`` if there is not one.
+
+        ``None`` is the honest answer for a request completed before results were being
+        stored, and for one whose first attempt claimed the key and then failed. Both are
+        genuinely "we do not know what happened", and inventing a result would be worse
+        than saying so.
+        """
+        if not request.idempotency_key:
+            return None
+        record = self.state.lookup_idempotency(request.idempotency_key)
+        if record is None:
+            return None
+        try:
+            stored = json.loads(record.result_json)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(stored, dict) or not stored:
+            return None
+        return ReplayedResult(**{k: stored.get(k) for k in ReplayedResult.FIELDS})
 
     # ---------------------------------------------------------------- internals
     def _act(
@@ -342,6 +412,17 @@ class PayNaka:
             )
 
         self._post(request, result)
+
+        # The second half of the idempotency claim. The key was taken before the rail was
+        # called -- it has to be, or two copies of one request both find it free -- so a
+        # placeholder went in and, until now, stayed there. A retry after a timeout got
+        # back "nothing happened" about a payment that had in fact been made, and the
+        # order id was gone.
+        if request.idempotency_key:
+            self.state.complete_idempotency(
+                request.idempotency_key, json.dumps(_describe_result(result))
+            )
+
         settled = self._write(
             {
                 "kind": "executed",
