@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2106 tests" src="https://img.shields.io/badge/tests-2106-2F6B4F?style=flat-square">
-  <img alt="1338 adversarial" src="https://img.shields.io/badge/adversarial-1338-2F6B4F?style=flat-square">
+  <img alt="2153 tests" src="https://img.shields.io/badge/tests-2153-2F6B4F?style=flat-square">
+  <img alt="1385 adversarial" src="https://img.shields.io/badge/adversarial-1385-2F6B4F?style=flat-square">
   <img alt="coverage 92%" src="https://img.shields.io/badge/coverage-92%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -108,6 +108,48 @@ records, because *which agent asked* is an audit question a session id does not 
 With nothing configured the service mints a development credential rather than admitting
 everyone — the check stays live, only the origin of the credential changes — and with a
 real rail configured it refuses to start without one.
+
+## A real Razorpay payment, gated
+
+Every other number here comes from `rails/sim.py`. These came from api.razorpay.com in test
+mode, driven through the checkpoint. `make razorpay-lifecycle`, raw responses committed in
+[var/evidence/](var/evidence/).
+
+```
+order      order_TTfEwDFYYo2xsb    ₹1,999.00   created through the gate
+payment    pay_TTfuF5dtZY8YdI      ₹1,999.00   captured — a person authenticated at Checkout
+refund     rfnd_TTfwxO2pJfOK3j       ₹499.00   partial, gated, balance claimed
+```
+
+Razorpay's own record confirms it: `amount_refunded: 49900`, `refund_status: partial`.
+
+**The two refusals are the point.** On the same real rail, in the same run:
+
+- a ₹50,000 gift card against a ₹1,999 mandate → `envelope.item_not_in_intent`. **Razorpay is
+  never called.** A bound the payment provider enforces for us would be the provider's
+  bound, not ours.
+- a second refund of ₹1,999 against ₹1,500 still refundable → `refund.exceeds_capture`, again
+  before the API is touched.
+
+**One thing arrived unplanned.** The order's `notes` came back carrying
+`paynaka_audit_head` and `paynaka_audit_len` — the Tier-3 anchor from `anchor.py`, riding in
+a call that was happening anyway. Razorpay now holds a copy of this chain's head that the
+merchant cannot edit. That was designed against a simulator; this is the first time it has
+been true of a real payment provider.
+
+**What is autonomous and what is not**, because the middle row is the argument rather than a
+gap being hidden:
+
+| Step | Who |
+|---|---|
+| order | the agent, through the gate |
+| **payment** | **a person, at Checkout** |
+| capture | Razorpay, on authentication (default automatic capture) |
+| refund | the agent, through the gate |
+
+`pay_order` raises `RailError` and always has. An agent that could authenticate as the
+customer would be an agent holding the customer's payment credentials, which is the thing
+this project exists to prevent.
 
 ## What this actually does to a payment, and what it does not
 
@@ -774,7 +816,7 @@ verifies is worse than none.
 
 ## Testing
 
-2,106 tests, of which **1,338 are adversarial**. 92% branch coverage on `paynaka/`,
+2,153 tests, of which **1,385 are adversarial**. 92% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

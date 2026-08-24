@@ -1,0 +1,18 @@
+{
+  "decision": {
+    "action": "create_refund",
+    "check_id": "refund.exceeds_capture",
+    "evidence": {
+      "already_refunded": 49900,
+      "captured": 199900,
+      "refundable": 150000,
+      "requested": 199900
+    },
+    "latency_us": 141,
+    "mandate_id": "mnd_36a08143759849ef97803ed3",
+    "reason": "refund 199900 exceeds the 150000 still refundable on this payment",
+    "replayed": false,
+    "request_id": "req_overrefund_pay_TTfuF5dtZY8YdI",
+    "verdict": "DENY"
+  }
+}

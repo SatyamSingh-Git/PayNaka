@@ -6,13 +6,25 @@
          padding: 0 1rem; }
   code { background: #eee; padding: .1rem .3rem; }
   #out { margin-top: 2rem; padding: 1rem; background: #f4f4f4; white-space: pre-wrap; }
+  .warn { border-left: 3px solid #c47f00; padding-left: .8rem; }
+  h2 { margin-top: 2rem; font-size: 1.1rem; }
 </style>
 <h1>Complete the test payment</h1>
 <p>Order <code>order_TTfEwDFYYo2xsb</code> for &#8377;1,999.00, created through PayNaka
 against Razorpay test mode.</p>
 <p>This page exists because a buying agent <em>must not</em> be able to authenticate as the
 customer. That step is yours.</p>
-<p>Test card <code>4111 1111 1111 1111</code>, any future expiry, any CVV, any OTP.</p>
+
+<h2>How to pay</h2>
+<p><b>Netbanking is the reliable path.</b> Choose <em>Netbanking</em>, pick any bank, and
+click <em>Success</em> on the simulator page that follows. Nothing is charged.</p>
+<p><b>UPI</b> also works: enter the test VPA <code>success@razorpay</code>.</p>
+<p class="warn"><b>Cards may be refused.</b> Razorpay's widely-quoted test card
+<code>4111 1111 1111 1111</code> is an <em>international</em> Visa, and a domestic-only test
+account rejects it with &ldquo;International cards are not supported&rdquo;. If you want to
+use a card, take one from the domestic list on Razorpay&rsquo;s
+<a href="https://razorpay.com/docs/payments/payments/test-card-details/">test card details</a>
+page rather than from memory.</p>
 <button id="pay">Pay &#8377;1,999.00</button>
 <div id="out"></div>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
