@@ -85,6 +85,31 @@ CREATE TABLE IF NOT EXISTS mandate_spend (
 );
 CREATE INDEX IF NOT EXISTS mandate_spend_by_mandate ON mandate_spend (mandate_id);
 
+-- A short-lived, single-use ticket that lets an authenticated MCP client bind the mandate
+-- it was just issued to its own session.
+--
+-- It exists because the proxy's `bind()` had no route into it: an external client could
+-- list and read, and every write answered "no mandate". The session identity itself came
+-- from a client-supplied header, so a caller could also simply claim somebody else's.
+--
+-- The token is stored as a hash, never in the clear. A grant is authority to spend a
+-- mandate, so a leaked database must not hand anybody a working one -- the same reasoning
+-- that applies to any other credential at rest.
+--
+-- Single-use is enforced by the state column rather than a flag, so two concurrent
+-- redemptions cannot both succeed: 'issued' -> 'redeemed' is one guarded UPDATE.
+CREATE TABLE IF NOT EXISTS grants (
+    token_hash   TEXT PRIMARY KEY,
+    mandate_json TEXT NOT NULL,
+    subject      TEXT NOT NULL,
+    issued_at    INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    state        TEXT NOT NULL CHECK (state IN ('issued', 'redeemed')),
+    redeemed_by  TEXT,
+    redeemed_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS grants_state ON grants (state, expires_at);
+
 CREATE TABLE IF NOT EXISTS returns (
     payment_id TEXT PRIMARY KEY,
     at         INTEGER NOT NULL
@@ -391,6 +416,72 @@ class SqliteState:
         return remaining
 
     # ---------------------------------------------------------------- reservations
+    # ---------------------------------------------------------------- grants
+    def issue_grant(
+        self,
+        token_hash: str,
+        mandate_json: str,
+        subject: str,
+        ttl_seconds: int,
+        *,
+        clock: Clock | None = None,
+    ) -> int:
+        """Record a single-use ticket for binding a mandate. Returns its expiry.
+
+        Only the hash is stored. A grant is authority to spend a mandate, so a database
+        somebody walks off with must not contain working ones.
+        """
+        if not token_hash or not mandate_json or not subject:
+            raise StateError("a grant needs a token, a mandate and a subject")
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
+            raise StateError(f"a grant ttl must be a positive int, got {ttl_seconds!r}")
+
+        now = self._now(clock)
+        expires_at = now + ttl_seconds
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO grants "
+                "(token_hash, mandate_json, subject, issued_at, expires_at, state) "
+                "VALUES (?, ?, ?, ?, ?, 'issued')",
+                (token_hash, mandate_json, subject, now, expires_at),
+            )
+        return expires_at
+
+    def redeem_grant(self, token_hash: str, by: str, *, clock: Clock | None = None) -> str | None:
+        """Spend a grant. Returns the mandate it carried, or ``None``.
+
+        ``None`` for every reason -- unknown, already spent, expired -- because telling a
+        caller *which* tells them whether a token they guessed ever existed.
+
+        One guarded UPDATE, so two concurrent redemptions cannot both win. Expiry is part
+        of the guard rather than checked before it: a check-then-update has a window, and
+        a grant is a capability.
+        """
+        if not token_hash or not by:
+            raise StateError("redeeming a grant needs a token and a caller")
+
+        now = self._now(clock)
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE grants SET state = 'redeemed', redeemed_by = ?, redeemed_at = ? "
+                "WHERE token_hash = ? AND state = 'issued' AND expires_at > ?",
+                (by, now, token_hash, now),
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = self._conn.execute(
+                "SELECT mandate_json FROM grants WHERE token_hash = ?", (token_hash,)
+            ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    def grant_state(self, token_hash: str) -> str | None:
+        """What became of a grant. For the console and for tests, never for a decision."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT state FROM grants WHERE token_hash = ?", (token_hash,)
+            ).fetchone()
+        return str(row[0]) if row is not None else None
+
     def reserve_mandate_spend(
         self, mandate_id: str, key: str, amount: int, ceiling: int, *, clock: Clock | None = None
     ) -> bool:

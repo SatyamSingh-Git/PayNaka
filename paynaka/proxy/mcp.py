@@ -29,6 +29,7 @@ from typing import Any, Final
 
 from paynaka.engine import ExecutionResult, PayNaka
 from paynaka.gate import LineItem, MoneyRequest, Verdict
+from paynaka.grants import Grants
 from paynaka.mandate import SignedMandate
 from paynaka.money import format_inr
 
@@ -144,11 +145,22 @@ class SessionBinding:
 class McpProxy:
     """MCP server in, PayNaka out."""
 
-    def __init__(self, naka: PayNaka, *, server_name: str = "paynaka") -> None:
+    def __init__(
+        self,
+        naka: PayNaka,
+        *,
+        server_name: str = "paynaka",
+        grants: Grants | None = None,
+    ) -> None:
         self.naka = naka
         self.server_name = server_name
         self._bindings: dict[str, SessionBinding] = {}
         self.calls: list[dict[str, Any]] = []
+        #: Redeems the short-lived tickets that let an external client bind a mandate.
+        #: Optional so the in-process harnesses, which call `bind()` directly, are
+        #: unaffected -- but a deployment without one has no external binding path at all,
+        #: which is the state this whole mechanism exists to leave behind.
+        self.grants: Grants | None = grants
 
     # ---------------------------------------------------------------- sessions
     def bind(self, session_id: str, signed: SignedMandate) -> None:
@@ -198,7 +210,13 @@ class McpProxy:
 
     def _dispatch(self, method: str, params: dict[str, Any], session_id: str) -> dict[str, Any]:
         if method == "initialize":
+            # A grant presented here binds this session to the mandate it carries. Absent,
+            # the session is still usable for reads and every money action will answer
+            # "no mandate" -- which is the fail-closed direction and is what an
+            # unauthenticated client should get.
+            bound = self._redeem_if_presented(params, session_id)
             return {
+                **({"boundSession": bound} if bound else {}),
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": self.server_name, "version": "0.1.0"},
@@ -215,6 +233,31 @@ class McpProxy:
         if method == "tools/call":
             return self._call(params, session_id)
         raise McpError(METHOD_NOT_FOUND, f"unknown method: {method}")
+
+    def _redeem_if_presented(self, params: dict[str, Any], session_id: str) -> str | None:
+        """Bind this session to a mandate, if a usable grant came with the request.
+
+        ``session_id`` is *not* the string the client sent. The caller composes it from the
+        authenticated identity on the HTTP request, so a grant redeemed by one caller can
+        never bind another's session -- which was the hole underneath the missing bind
+        route, not merely a missing route.
+        """
+        token = params.get("mandateGrant")
+        if token is None:
+            return None
+        if self.grants is None:
+            raise McpError(INVALID_PARAMS, "this checkpoint cannot redeem mandate grants")
+        if not isinstance(token, str):
+            raise McpError(INVALID_PARAMS, "mandateGrant must be a string")
+
+        try:
+            signed = self.grants.redeem(token, by=session_id, clock=self.naka.clock)
+        except Exception as exc:
+            # One message for every failure, deliberately. See `Grants.redeem`.
+            raise McpError(INVALID_PARAMS, str(exc)) from exc
+
+        self.bind(session_id, signed)
+        return signed.mandate.session_id
 
     # ---------------------------------------------------------------- tools/call
     def _call(self, params: dict[str, Any], session_id: str) -> dict[str, Any]:

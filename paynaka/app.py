@@ -37,6 +37,7 @@ from paynaka.audit import AuditChain
 from paynaka.clock import FrozenClock
 from paynaka.engine import PayNaka
 from paynaka.env import load_env
+from paynaka.grants import Grants
 from paynaka.identity import Caller, TokenRegistry, Unauthenticated, load_approvers
 from paynaka.issuer import Issuer, IssuerError, ShopperIntent
 from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
@@ -107,6 +108,8 @@ class Hub:
         self.state = SqliteState(":memory:", clock=self.clock)
         self.audit = AuditChain(":memory:", clock=self.clock)
         self.policy = Policy.from_yaml("policy.yaml")
+        # After `state`, which it writes to.
+        self.grants = Grants(self.state, self.signer.verifier())
         self.naka = PayNaka(
             rail=build_rail(),
             policy=self.policy,
@@ -116,7 +119,7 @@ class Hub:
             clock=self.clock,
             mode=self.mode,
         )
-        self.proxy = McpProxy(self.naka)
+        self.proxy = McpProxy(self.naka, grants=self.grants)
         self.events.clear()
 
     def emit(self, kind: str, payload: dict[str, Any]) -> None:
@@ -225,7 +228,12 @@ async def mcp(request: Request) -> dict[str, Any] | None:
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
 
-    session_id = request.headers.get("mcp-session-id", "default")
+    # Composed, never taken as given. The client picks the second half; the first is the
+    # identity this service authenticated. Without that, `mcp-session-id` is a claim about
+    # who you are that nothing checks, and one caller could bind -- or borrow -- another's
+    # session simply by naming it.
+    client_session = request.headers.get("mcp-session-id", "default")
+    session_id = f"{caller.name}:{client_session}"
     response = hub.proxy.handle(body, session_id=session_id)
 
     if isinstance(body, dict) and body.get("method") == "tools/call":
@@ -233,7 +241,7 @@ async def mcp(request: Request) -> dict[str, Any] | None:
             "mcp.call",
             {
                 "tool": (body.get("params") or {}).get("name"),
-                "session": session_id,
+                "session": client_session,
                 # The name, never the credential. "which agent asked" is an audit
                 # question, and a session id does not answer it.
                 "caller": caller.name,
@@ -437,7 +445,7 @@ def decide(escalation_id: str, answer: str, request: Request) -> dict[str, Any]:
 
 
 @app.post("/api/intent")
-def freeze_intent(intent: dict[str, Any]) -> dict[str, Any]:
+def freeze_intent(intent: dict[str, Any], request: Request) -> dict[str, Any]:
     """Turn a shopper's stated intent into a signed mandate. The start of every trip.
 
     This is the *shopper's* surface, not the agent's, and in a real deployment it would not
@@ -448,6 +456,12 @@ def freeze_intent(intent: dict[str, Any]) -> dict[str, Any]:
     controlled text is read, which is the ordering the whole design rests on, and
     `frozen_at` puts that ordering on the record rather than in the narration.
     """
+    # Issuing authority is a privileged act, so the surface that does it authenticates.
+    # It used to be open, which meant anybody who could reach the port could mint a mandate
+    # for themselves -- and the checkpoint would have verified it perfectly, because it was
+    # genuinely signed.
+    caller = authenticated(request)
+
     try:
         stated = ShopperIntent(
             subject=str(intent.get("subject", "")),
@@ -474,8 +488,14 @@ def freeze_intent(intent: dict[str, Any]) -> dict[str, Any]:
             "frozen_at": issued.frozen_at,
         },
     )
+    # The ticket that lets this caller bind the mandate to an MCP session. Short-lived and
+    # single-use: the signed mandate is long-lived authority and should not be travelling on
+    # every session-init, logged by everything in between.
+    grant = hub.grants.issue(issued.signed, clock=hub.clock)
     return {
         **issued.to_dict(),
+        **grant.to_dict(),
+        "issued_to": caller.name,
         "budget_formatted": format_inr(stated.budget_paise),
     }
 

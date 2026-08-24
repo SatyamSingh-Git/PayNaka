@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2073 tests" src="https://img.shields.io/badge/tests-2073-2F6B4F?style=flat-square">
+  <img alt="2090 tests" src="https://img.shields.io/badge/tests-2090-2F6B4F?style=flat-square">
   <img alt="1332 adversarial" src="https://img.shields.io/badge/adversarial-1332-2F6B4F?style=flat-square">
   <img alt="coverage 92%" src="https://img.shields.io/badge/coverage-92%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
@@ -162,6 +162,46 @@ It does not parse language. Turning "a bag of atta under two thousand" into a SK
 paise ceiling is the one place a model belongs in this system — on the shopper's side of the
 boundary, reading text the shopper typed rather than text a merchant controls. The issuer
 takes the structured result, and nothing upstream can widen what comes out.
+
+## Pointing a real MCP client at it
+
+The product claim is a drop-in checkpoint in front of an MCP server, and for a while the
+external path could not do the one thing it exists for: `McpProxy.bind()` was reachable only
+from a test fixture. An agent pointed at `/mcp` could initialize, list tools and call read
+tools — and every money action answered *no mandate for this session*. The local demo hid
+that by going through the internal `ToolBox → PayNaka.execute` route instead.
+
+Underneath the missing route was the worse problem: session identity came from an
+`mcp-session-id` header that nothing checked, so any authenticated caller could name any
+session — including somebody else's.
+
+Both are closed by a **grant**: a short-lived, single-use ticket issued beside a mandate and
+redeemed once at MCP `initialize`.
+
+```
+POST /api/intent            (authenticated)  ->  signed mandate + mandate_grant
+POST /mcp  initialize       {"mandateGrant": "..."}  ->  {"boundSession": "sess_..."}
+POST /mcp  tools/call       create_order  ->  checked against that mandate
+```
+
+Identity comes from two places and neither suffices alone. **Who you are** is the
+authenticated caller on the request, not a header you chose. **What you may spend** is the
+grant. The session key is composed from both, so a grant redeemed by one caller cannot bind
+another's session, and two shopping trips by the same agent do not inherit each other's
+authority.
+
+The grant exists rather than presenting the mandate directly because the signed mandate is
+long-lived authority — it should not be travelling on every session-init, logged by
+everything in between. A grant is worthless minutes after issue and worthless again the
+moment it is used once.
+
+`/api/intent` authenticates now too. It used to be open, which meant anyone who could reach
+the port could mint themselves a mandate — and the checkpoint would have verified it
+perfectly, because it was genuinely signed.
+
+Seventeen tests drive this over HTTP only. None of them may call `bind()`: a test that
+reaches for the internal helper proves the object works and says nothing about whether
+anybody can get to it, which was exactly the defect.
 
 ## Receiving webhooks, and proving they are real
 
@@ -696,7 +736,7 @@ verifies is worse than none.
 
 ## Testing
 
-2,073 tests, of which **1,332 are adversarial**. 92% branch coverage on `paynaka/`,
+2,090 tests, of which **1,332 are adversarial**. 92% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

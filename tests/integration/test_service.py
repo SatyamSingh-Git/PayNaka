@@ -356,6 +356,7 @@ class TestTheIntentSurface:
     def test_stated_intent_becomes_a_signed_mandate(self, client: TestClient) -> None:
         body = client.post(
             "/api/intent",
+            headers=AUTH,
             json={
                 "subject": "cust_kirana_001",
                 "session_id": "sess_http",
@@ -372,6 +373,7 @@ class TestTheIntentSurface:
         """The ordering the design rests on, made a matter of record."""
         body = client.post(
             "/api/intent",
+            headers=AUTH,
             json={
                 "subject": "c",
                 "session_id": "s",
@@ -404,7 +406,7 @@ class TestTheIntentSurface:
             "skus": ["ATTA-5KG"],
             "destinations": ["addr_home"],
         }
-        response = client.post("/api/intent", json={**base, **payload})
+        response = client.post("/api/intent", headers=AUTH, json={**base, **payload})
         assert response.status_code == 400, why
 
 
