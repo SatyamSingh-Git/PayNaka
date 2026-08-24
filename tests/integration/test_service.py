@@ -304,6 +304,50 @@ class TestTheApprovalSurface:
         assert body["timeout_seconds"] > 0
 
 
+NEWLINE = chr(10)
+
+
+class TestTheMetricsSurface:
+    """An audit chain nobody watches breaks quietly. These are what makes it watched."""
+
+    def test_the_exposition_scrapes(self, client: TestClient) -> None:
+        client.post("/api/demo/attack")
+        body = client.get("/metrics").text
+        assert "paynaka_decisions_total" in body
+        assert "paynaka_denied_total" in body
+        assert body.endswith(NEWLINE)
+
+    def test_the_alarm_metric_reports_a_healthy_chain(self, client: TestClient) -> None:
+        client.post("/api/demo/happy")
+        assert "paynaka_audit_chain_intact 1" in client.get("/metrics").text
+
+    def test_a_scrape_can_decline_to_pay_for_verification(self, client: TestClient) -> None:
+        """A full rehash on every fifteen-second scrape is a real cost on a long chain, so
+        it is opt-out -- but verifying is the default, because tamper detection that
+        defaults to not looking is worse than none."""
+        assert "paynaka_audit_chain_intact 1" in client.get("/metrics?verify=false").text
+
+    def test_the_denial_shows_up_attributed_to_its_check(self, client: TestClient) -> None:
+        client.post("/api/demo/attack")
+        body = client.get("/metrics").text
+        assert 'check_id="envelope.item_not_in_intent"' in body
+
+    def test_money_moved_is_paise_and_matches_the_demo(self, client: TestClient) -> None:
+        client.post("/api/demo/happy")
+        body = client.get("/api/metrics").json()
+        assert body["money_moved"] == AUTHORISED
+        assert body["money_moved_formatted"].startswith("₹")
+
+    def test_the_json_and_the_exposition_agree(self, client: TestClient) -> None:
+        """Two renderings of one derivation. If these disagree, one of them is a second
+        source of truth, which is the thing this module exists not to be."""
+        client.post("/api/demo/attack")
+        body = client.get("/api/metrics").json()
+        text = client.get("/metrics").text
+        assert f"paynaka_decisions_total {body['decisions']}" in text
+        assert f"paynaka_denied_total {body['denied']}" in text
+
+
 class TestPolicySurface:
     def test_policy_renders_amounts_for_humans(self, client: TestClient) -> None:
         body = client.get("/api/policy").json()

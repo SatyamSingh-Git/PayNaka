@@ -25,7 +25,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from buyer.agent import BuyerAgent, load_prompt
 from buyer.brains import ScriptedBrain
@@ -38,6 +38,7 @@ from paynaka.engine import PayNaka
 from paynaka.env import load_env
 from paynaka.identity import Caller, TokenRegistry, Unauthenticated, load_approvers
 from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
+from paynaka.metrics import collect, render_prometheus
 from paynaka.mode import Mode, shadow_report
 from paynaka.money import format_inr
 from paynaka.policy import Policy
@@ -329,6 +330,39 @@ def shadow() -> dict[str, Any]:
         "by_check_amount_formatted": {
             check: format_inr(amount) for check, amount in sorted(report.by_check_amount.items())
         },
+    }
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics(verify: bool = True) -> str:
+    """Prometheus exposition. The one series worth an alarm is chain_intact.
+
+    ``verify`` recomputes the whole chain, which is what makes
+    ``paynaka_audit_chain_intact`` meaningful rather than decorative. It is a full rehash,
+    so a deployment scraping every fifteen seconds against a long chain should pass
+    ``?verify=false`` and verify on a slower schedule -- but the default is to actually
+    check, because a tamper-detection metric that defaults to not looking is worse than no
+    metric at all.
+    """
+    snapshot = collect(record.payload for record in hub.audit.records())
+    return render_prometheus(
+        snapshot,
+        chain_records=len(hub.audit),
+        chain_intact=hub.audit.verify() is None if verify else True,
+        mode=hub.mode.value,
+    )
+
+
+@app.get("/api/metrics")
+def metrics_json() -> dict[str, Any]:
+    """The same counts as JSON, for the console."""
+    snapshot = collect(record.payload for record in hub.audit.records())
+    return {
+        **snapshot.to_dict(),
+        "money_moved_formatted": format_inr(snapshot.money_moved),
+        "chain_records": len(hub.audit),
+        "chain_intact": hub.audit.verify() is None,
+        "mode": hub.mode.value,
     }
 
 

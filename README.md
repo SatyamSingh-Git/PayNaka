@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1583 tests" src="https://img.shields.io/badge/tests-1583-2F6B4F?style=flat-square">
+  <img alt="1630 tests" src="https://img.shields.io/badge/tests-1630-2F6B4F?style=flat-square">
   <img alt="1061 adversarial" src="https://img.shields.io/badge/adversarial-1061-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
@@ -414,6 +414,32 @@ regulation as executable policy:
 | contact 08:00–19:00 | out-of-hours collection contact | RBI |
 | AFA above ₹15,000 | skipped additional-factor auth | RBI |
 
+## Watching it
+
+An audit chain nobody watches breaks quietly. `paynaka/anchor.py` makes tampering
+*detectable*; detectable is not detected. `GET /metrics` is the other half — Prometheus
+exposition, hand-rolled against a dull stable format rather than pulling a dependency into
+the money-path process.
+
+```
+paynaka_audit_chain_intact 1     <- the one worth an alarm rather than a graph
+paynaka_enforcing 1              <- 0 means nothing is being stopped
+paynaka_denied_total 37
+paynaka_step_up_total 4
+paynaka_money_moved_paise 8412300
+paynaka_check_total{check_id="envelope.price_moved"} 9
+```
+
+`paynaka_audit_chain_intact 0` means the chain no longer verifies against itself, which is
+corruption or somebody editing history. Both are incidents. Every other series answers *how
+is it going*; that one answers *is the record still true*. The scrape recomputes the chain
+by default — a tamper-detection metric that defaults to not looking is worse than no metric
+— and `?verify=false` opts out for deployments scraping a long chain every fifteen seconds.
+
+Every figure is derived from the audit records on scrape, never accumulated in a counter
+beside the decision. A counter is faster and is a second source of truth that can disagree
+with the chain; when they disagree the counter is wrong, so it should not exist.
+
 ## Quickstart
 
 ```bash
@@ -484,7 +510,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,583 tests, of which **1,061 are adversarial**. 88% branch coverage on `paynaka/`,
+1,630 tests, of which **1,061 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?
