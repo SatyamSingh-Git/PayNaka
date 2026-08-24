@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1821 tests" src="https://img.shields.io/badge/tests-1821-2F6B4F?style=flat-square">
-  <img alt="1120 adversarial" src="https://img.shields.io/badge/adversarial-1120-2F6B4F?style=flat-square">
+  <img alt="1966 tests" src="https://img.shields.io/badge/tests-1966-2F6B4F?style=flat-square">
+  <img alt="1243 adversarial" src="https://img.shields.io/badge/adversarial-1243-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -100,6 +100,60 @@ records, because *which agent asked* is an audit question a session id does not 
 With nothing configured the service mints a development credential rather than admitting
 everyone — the check stays live, only the origin of the credential changes — and with a
 real rail configured it refuses to start without one.
+
+## Where the mandate comes from
+
+Everything above is downstream of a signed `IntentMandate` already existing, and for most of
+this project's life **nothing produced one**. `IntentMandate.create` was called by the demo
+service and eight test harnesses — the whole argument rested on an object no production code
+path created. `paynaka/issuer.py` is that path.
+
+```
+shopper states intent ──▶ Issuer ──sign──▶ IntentMandate ──▶ agent
+                            │                                  │
+                     holds the PRIVATE key            holds no credentials
+                                                               │
+                                              PayNaka holds only the PUBLIC key
+```
+
+Three properties, each tested:
+
+**It holds the private key and the gate does not**, so a compromised checkpoint can refuse a
+mandate and cannot mint one. That was always true of the types; now it is true of two
+components that are actually apart.
+
+**It cannot widen what the shopper said.** Every field is derived from the stated intent and
+bounded by it, and the issuer re-audits its own output on every issue. An intent with no SKU
+list is refused — that is a blank cheque inside a budget — as is one with no destination, a
+budget that is a typo, or a year-long window.
+
+**It records when intent was frozen**, which turns "captured before exposure" from a claim
+into a timestamp an incident review can check.
+
+It does not parse language. Turning "a bag of atta under two thousand" into a SKU and a
+paise ceiling is the one place a model belongs in this system — on the shopper's side of the
+boundary, reading text the shopper typed rather than text a merchant controls. The issuer
+takes the structured result, and nothing upstream can widen what comes out.
+
+## Receiving webhooks, and proving they are real
+
+`make chaos` shows what the engine does with duplicate and reordered deliveries, entirely in
+process. That proves the semantics and left a gap: a real webhook is an HTTP POST, and
+nothing here could receive one.
+
+A webhook says *money moved*. It is an instruction to write the ledger, arriving over the
+open internet from a source anybody can imitate. `POST /webhooks/razorpay` verifies
+HMAC-SHA256 over the **raw body** — the bytes as they arrived, never a re-serialised parse,
+because that mistake fails *open*: JSON round-tripping normalises whitespace and key order,
+so a tampered body would verify against its own normalisation.
+
+**No secret configured means nothing is accepted**, not that everything is. There is no
+development mode that skips verification.
+
+And the line worth drawing: a verified webhook is trusted to have come from Razorpay, and
+nothing more. What it *claims* still passes the ledger's invariants — a genuine
+`payment.captured` for more than was authorised is a real message about a real problem.
+Verification answers *who sent this*, never *is this true*.
 
 ## Adoption: enforce, or observe first
 
@@ -561,7 +615,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,821 tests, of which **1,120 are adversarial**. 88% branch coverage on `paynaka/`,
+1,966 tests, of which **1,243 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

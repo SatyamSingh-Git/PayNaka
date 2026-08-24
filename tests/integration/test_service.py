@@ -7,6 +7,7 @@ ledger both times. If this file passes, `make demo-attack` tells the truth.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 
 import pytest
@@ -346,6 +347,120 @@ class TestTheMetricsSurface:
         text = client.get("/metrics").text
         assert f"paynaka_decisions_total {body['decisions']}" in text
         assert f"paynaka_denied_total {body['denied']}" in text
+
+
+class TestTheIntentSurface:
+    """Where a mandate comes from. Everything else in the system is downstream of this,
+    and until now nothing in the repository produced one outside a test fixture."""
+
+    def test_stated_intent_becomes_a_signed_mandate(self, client: TestClient) -> None:
+        body = client.post(
+            "/api/intent",
+            json={
+                "subject": "cust_kirana_001",
+                "session_id": "sess_http",
+                "budget_paise": 199_900,
+                "skus": ["ATTA-5KG"],
+                "destinations": ["addr_home"],
+            },
+        ).json()
+        assert body["signed"]["mandate"]["max_total"] == 199_900
+        assert body["signed"]["signature"]
+        assert body["budget_formatted"].startswith("₹")
+
+    def test_it_records_when_intent_was_frozen(self, client: TestClient) -> None:
+        """The ordering the design rests on, made a matter of record."""
+        body = client.post(
+            "/api/intent",
+            json={
+                "subject": "c",
+                "session_id": "s",
+                "budget_paise": 199_900,
+                "skus": ["ATTA-5KG"],
+                "destinations": ["addr_home"],
+            },
+        ).json()
+        assert body["frozen_at"] > 0
+
+    @pytest.mark.parametrize(
+        ("payload", "why"),
+        [
+            ({"skus": []}, "no SKU allow-list is a blank cheque"),
+            ({"destinations": []}, "goods could go anywhere"),
+            ({"budget_paise": 0}, "a budget that authorises nothing"),
+            ({"budget_paise": -1}, "a negative budget"),
+            ({"ttl_seconds": 99_999_999}, "authority left lying around"),
+        ],
+        ids=["no-skus", "no-destinations", "zero-budget", "negative-budget", "huge-window"],
+    )
+    def test_an_unbounded_intent_is_a_400_not_a_500(
+        self, client: TestClient, payload: dict[str, object], why: str
+    ) -> None:
+        """Nothing went wrong; something was declined."""
+        base = {
+            "subject": "c",
+            "session_id": "s",
+            "budget_paise": 199_900,
+            "skus": ["ATTA-5KG"],
+            "destinations": ["addr_home"],
+        }
+        response = client.post("/api/intent", json={**base, **payload})
+        assert response.status_code == 400, why
+
+
+class TestTheWebhookSurface:
+    """An unverified webhook is an instruction to write the ledger, from anybody at all."""
+
+    def test_an_unsigned_webhook_is_refused(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", "a-real-endpoint-secret-value")
+        response = client.post("/webhooks/razorpay", json={"event": "payment.captured"})
+        assert response.status_code == 401
+
+    def test_a_wrongly_signed_webhook_is_refused(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", "a-real-endpoint-secret-value")
+        response = client.post(
+            "/webhooks/razorpay",
+            json={"event": "payment.captured"},
+            headers={"X-Razorpay-Signature": "0" * 64},
+        )
+        assert response.status_code == 401
+
+    def test_a_correctly_signed_webhook_is_accepted(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+        import hmac
+
+        secret = "a-real-endpoint-secret-value"
+        monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", secret)
+        body = json.dumps(
+            {
+                "event": "payment.captured",
+                "id": "evt_1",
+                "payload": {"payment": {"entity": {"id": "pay_1", "amount": 199_900}}},
+            }
+        ).encode("utf-8")
+        signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        response = client.post(
+            "/webhooks/razorpay",
+            content=body,
+            headers={"X-Razorpay-Signature": signature, "content-type": "application/json"},
+        )
+        assert response.status_code == 200
+        assert response.json()["payment_id"] == "pay_1"
+
+    def test_with_no_secret_configured_nothing_is_accepted(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """503, not 200. There is no development mode that skips verification."""
+        monkeypatch.delenv("RAZORPAY_WEBHOOK_SECRET", raising=False)
+        monkeypatch.setattr("paynaka.webhooks.os.environ", {})
+        response = client.post("/webhooks/razorpay", json={"event": "payment.captured"})
+        assert response.status_code == 503
 
 
 class TestPolicySurface:

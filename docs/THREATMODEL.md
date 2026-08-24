@@ -50,6 +50,68 @@ duplicate-JSON-key smuggling, type confusion, unknown-field injection, oversize
 allow-lists, and mandates stamped in the future or valid for a year — all refused, all
 tested.
 
+### Authority that was never granted, because nothing granted it
+
+Every check in this document compares a request against a mandate. The mandate itself was
+upstream of all of it and, until now, nothing in this repository produced one:
+`IntentMandate.create` was called by the demo service and eight test harnesses. The entire
+argument rested on an object that no production code path created.
+
+`paynaka/issuer.py` is that path, and it is a separate module for three reasons.
+
+**It holds the private key; the gate does not.** `MandateVerifier` has only the public key,
+so a compromised checkpoint can refuse a mandate and cannot mint one. That separation was
+always in the types and never demonstrated by two components being apart. A test asserts
+the object handed downstream exposes no way to sign.
+
+**It cannot widen what the shopper said.** Every field is derived from the stated intent and
+bounded by it, and the issuer audits its own output on every issue -- budget, SKUs,
+destinations, quantity ceiling, refund permission, currency. That guard exists because the
+mapping is short and obvious *today*; the way this goes wrong later is a convenience default
+granting slightly more than was asked, and this turns that into a failure at issue time
+rather than authority nobody notices until it is spent.
+
+An unbounded intent is refused outright. No SKU allow-list is a blank cheque inside a
+budget; no destination allow-list lets goods go anywhere; a year-long window is authority
+left lying around. Those are refusals at the point of *asking*, which is the only point at
+which they are cheap.
+
+**It records when intent was frozen.** The design's central claim is that intent is captured
+before attacker-controlled text reaches the agent. `frozen_at` makes that ordering a matter
+of record rather than of narration.
+
+What it deliberately does not do is parse natural language. Turning "a bag of atta under two
+thousand" into a SKU and a paise ceiling is a language problem, and the only place in this
+system where a model belongs -- on the shopper's side of the boundary, reading text the
+shopper typed rather than text a merchant controls. The issuer takes the structured result,
+and nothing upstream of it can widen what comes out.
+
+### A forged webhook writing the ledger
+
+`chaos/` established what the engine does with duplicate, reordered and lost deliveries, and
+did it entirely in process. That proves the semantics and left a gap: a real webhook is an
+HTTP POST from Razorpay, and this system had nothing to receive one. "We handle duplicate
+webhooks" was true of the engine and untrue of the deployment.
+
+The gap is not plumbing. A webhook says *money moved* -- an instruction to write the ledger,
+arriving over the open internet from a source anybody can imitate. `paynaka/webhooks.py`
+verifies HMAC-SHA256 over the **raw body**, exactly as Razorpay specifies.
+
+Over the bytes as they arrived, never a re-serialised parse. That is the subtle way to get
+this wrong and it fails *open*: JSON round-tripping reorders keys and normalises whitespace,
+so a signature checked against the reconstruction would accept a body whose tampering the
+parser had normalised away. There is a test for exactly that.
+
+No secret configured means **nothing is accepted**, not that everything is. There is no
+development mode that skips verification, because a bypass is what gets found. A weak secret
+is refused at load for the same reason the token floor exists in `identity.py`.
+
+Its limit, stated: a verified webhook is trusted to have come from Razorpay, and nothing
+more. What it *claims* still passes through the ledger's own invariants -- a genuine
+`payment.captured` for more than was authorised is a real message about a real problem, and
+money conservation is what catches it. Verification answers "who sent this", never "is this
+true".
+
 ### An unauthenticated caller reaching the asking surface
 
 "The agent holds no payment credentials, it can only ask" is the design's first move, and

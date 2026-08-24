@@ -37,6 +37,7 @@ from paynaka.clock import FrozenClock
 from paynaka.engine import PayNaka
 from paynaka.env import load_env
 from paynaka.identity import Caller, TokenRegistry, Unauthenticated, load_approvers
+from paynaka.issuer import Issuer, IssuerError, ShopperIntent
 from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
 from paynaka.metrics import collect, render_prometheus
 from paynaka.mode import Mode, shadow_report
@@ -45,6 +46,13 @@ from paynaka.policy import Policy
 from paynaka.proxy.mcp import McpProxy
 from paynaka.rails import build_rail
 from paynaka.state import SqliteState
+from paynaka.webhooks import (
+    SIGNATURE_HEADER,
+    WebhookError,
+    load_webhook_secret,
+    parse_event,
+    verify_signature,
+)
 
 __all__ = ["app"]
 
@@ -79,6 +87,11 @@ class Hub:
         """
         self.clock = FrozenClock.at_ist(DEMO_CLOCK)
         self.signer = MandateSigner(generate_keypair()[0])
+        # In a deployment the issuer lives on the shopper's side of the boundary and
+        # the gate never sees the private key. Here there is one process, so they are
+        # co-located -- a property of the demo, not of the design. The engine below is
+        # still handed a verifier and nothing else.
+        self.issuer = Issuer(self.signer)
         # Built at startup, so a malformed or weak credential configuration is a failure
         # to boot rather than a 500 on the first money call. With nothing configured and
         # the simulated rail this mints a development credential; in front of a real rail
@@ -419,6 +432,85 @@ def decide(escalation_id: str, answer: str, request: Request) -> dict[str, Any]:
         },
     )
     return {**escalation.to_dict(), "amount_formatted": format_inr(escalation.amount)}
+
+
+@app.post("/api/intent")
+def freeze_intent(intent: dict[str, Any]) -> dict[str, Any]:
+    """Turn a shopper's stated intent into a signed mandate. The start of every trip.
+
+    This is the *shopper's* surface, not the agent's, and in a real deployment it would not
+    live in the same process as the gate -- whoever runs this holds the private key, and
+    the checkpoint deliberately does not. It is here because the demo is one process.
+
+    Nothing about the catalogue is consulted. Intent is frozen before any merchant-
+    controlled text is read, which is the ordering the whole design rests on, and
+    `frozen_at` puts that ordering on the record rather than in the narration.
+    """
+    try:
+        stated = ShopperIntent(
+            subject=str(intent.get("subject", "")),
+            session_id=str(intent.get("session_id", "")),
+            budget_paise=intent.get("budget_paise"),  # type: ignore[arg-type]
+            skus=tuple(intent.get("skus", ())),
+            destinations=tuple(intent.get("destinations", ())),
+            max_qty_per_sku=int(intent.get("max_qty_per_sku", 1)),
+            ttl_seconds=int(intent.get("ttl_seconds", 900)),
+            allow_refunds=bool(intent.get("allow_refunds", False)),
+        )
+        issued = hub.issuer.issue(stated, clock=hub.clock)
+    except (IssuerError, TypeError, ValueError) as exc:
+        # A refusal here is the shopper being told their intent is unbounded, which is a
+        # 400 and not a 500: nothing went wrong, something was declined.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    hub.emit(
+        "intent.frozen",
+        {
+            "mandate_id": issued.signed.mandate.mandate_id,
+            "session": stated.session_id,
+            "budget": stated.budget_paise,
+            "frozen_at": issued.frozen_at,
+        },
+    )
+    return {
+        **issued.to_dict(),
+        "budget_formatted": format_inr(stated.budget_paise),
+    }
+
+
+@app.post("/webhooks/razorpay")
+async def razorpay_webhook(request: Request) -> dict[str, Any]:
+    """Receive what Razorpay says happened, after proving Razorpay said it.
+
+    The signature covers the **raw body**, so the bytes are read before anything parses
+    them. Verifying against a re-serialised parse is the classic way to get this wrong and
+    it fails open: JSON round-tripping normalises whitespace and key order, so a tampered
+    body would verify against its own normalisation.
+
+    With no secret configured this refuses every delivery. There is no development mode
+    that skips verification -- an unverified webhook is an instruction to write the ledger,
+    from anybody at all.
+    """
+    body = await request.body()
+    try:
+        secret = load_webhook_secret()
+    except WebhookError as exc:
+        # 503 rather than 401: the caller did nothing wrong, this endpoint is unconfigured
+        # and is refusing to guess.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if not verify_signature(body, request.headers.get(SIGNATURE_HEADER), secret):
+        # One response for every reason. Distinguishing "no header" from "wrong digest"
+        # tells a forger which half was right.
+        raise HTTPException(status_code=401, detail="webhook signature did not verify")
+
+    try:
+        event = parse_event(body)
+    except WebhookError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    hub.emit("webhook.received", event.to_dict())
+    return {"accepted": True, **event.to_dict()}
 
 
 @app.get("/api/events")
