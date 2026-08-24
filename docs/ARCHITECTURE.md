@@ -64,6 +64,52 @@ That is the difference between "we made it harder" and "the action is not availa
 
 ---
 
+## Running more than one of these
+
+"It uses SQLite, so it is single-node" is the easy thing to say about this code and it is
+not what the code does. Every claim in `state.py` is a **single atomic statement** -- an
+`INSERT` guarded by a `UNIQUE` constraint, an `UPDATE` guarded on the current state, an
+upsert. The `SELECT` that follows only reads back what the statement already decided.
+SQLite in WAL mode serialises writers across connections, so none of those guarantees
+depend on being in one process.
+
+That is measured rather than asserted. `tests/adversarial/test_multinode.py` builds two
+independent `SqliteState` objects over one file -- two connections, two different
+`threading.RLock` instances, so the in-process lock cannot be what saves them -- and races
+24 callers at each claim:
+
+| Claim | Across two nodes |
+| --- | --- |
+| `consume_nonce` | exactly one node wins; the other sees it spent |
+| `claim_idempotency` | exactly one claim; every loser reads the winner's record and can replay it |
+| `reserve_refund` | 24 concurrent refunds against a ₹1,000 balance: exactly 4 of ₹250 claimed, and no more |
+| `consume_approval` | a step-up approval is spent once, whichever node the agent retries against |
+| `decide_escalation` | two approvers racing on two nodes produce exactly one answer |
+| `bump_denial` | counts sum across nodes, so the breaker does not need N× the denials on a fleet of N |
+| `revoke` / `is_revoked` | withdrawing authority on one node is honoured by the other |
+
+One asymmetry worth stating: `bump_denial`'s read-back can return a *higher* total if
+another node incremented between the upsert and the read. That is the safe direction -- a
+breaker that overshoots trips early, and one that undercounts fails to trip when it matters
+most.
+
+**Where it actually ends.** Two connections are what two *processes* have. They are not two
+*hosts*. Nodes that cannot see each other's storage share no state, and every row above
+evaporates: the same nonce is spendable on both, because there are now two checkpoints
+rather than one. That is a deployment fact, not something the code can fix, and it is
+asserted in the test file so it is never mistaken for a bug. `:memory:` -- which the demo
+service uses -- is per-connection and therefore always two checkpoints.
+
+**What a shared database would change.** The statements translate directly: SQLite's
+`INSERT OR IGNORE`, `ON CONFLICT DO UPDATE` and guarded `UPDATE` all have PostgreSQL
+equivalents with the same atomicity, and the schema is nine plain tables. The number that
+moves is latency, and `make latency` already says which one: the envelope checks cost
+**10 µs** and the full gate costs **1.0 ms**, so roughly 99% of a decision is the state
+store. A network round trip per claim is the cost to plan for -- not the checking, which is
+free.
+
+---
+
 ## The decision pipeline
 
 Checks run cheapest-and-most-certain first, and the first `DENY` short-circuits.

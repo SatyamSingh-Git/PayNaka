@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1759 tests" src="https://img.shields.io/badge/tests-1759-2F6B4F?style=flat-square">
-  <img alt="1058 adversarial" src="https://img.shields.io/badge/adversarial-1058-2F6B4F?style=flat-square">
+  <img alt="1821 tests" src="https://img.shields.io/badge/tests-1821-2F6B4F?style=flat-square">
+  <img alt="1120 adversarial" src="https://img.shields.io/badge/adversarial-1120-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -435,6 +435,36 @@ regulation as executable policy:
 | contact 08:00–19:00 | out-of-hours collection contact | RBI |
 | AFA above ₹15,000 | skipped additional-factor auth | RBI |
 
+## Running more than one of these
+
+"It uses SQLite, so it is single-node" is the easy thing to say, and it is not what the code
+does. Every claim in `state.py` is a **single atomic statement**; the `SELECT` after it only
+reads back what was already decided. SQLite in WAL mode serialises writers across
+connections, so those guarantees never depended on being in one process.
+
+Measured rather than asserted — two `SqliteState` objects over one file, two connections,
+two different locks, 24 racers at each claim:
+
+```
+consume_nonce        exactly one node wins
+claim_idempotency    exactly one claim; every loser can read and replay the winner's result
+reserve_refund       24 concurrent refunds on a ₹1,000 balance -> exactly 4 of ₹250
+consume_approval     one step-up approval, spent once, whichever node the agent retries
+bump_denial          counts sum, so the breaker does not need N× the denials on N nodes
+revoke               authority withdrawn on one node is honoured by the other
+```
+
+**Where it actually ends** is storage, not process count. Two nodes that cannot see each
+other's database share no state and every line above evaporates — the same nonce is
+spendable on both, because that is two checkpoints rather than one. No code change fixes
+that; it is what the deployment is. The test file asserts it too, so it is never mistaken
+for a bug.
+
+Moving to Postgres translates directly — `INSERT OR IGNORE`, `ON CONFLICT DO UPDATE` and a
+guarded `UPDATE` all have equivalents with the same atomicity, over nine plain tables. The
+number that moves is latency, and the section above already says which one: the checks cost
+10 µs, the state store costs the other 99% of a decision.
+
 ## Watching it
 
 An audit chain nobody watches breaks quietly. `paynaka/anchor.py` makes tampering
@@ -531,7 +561,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,759 tests, of which **1,058 are adversarial**. 88% branch coverage on `paynaka/`,
+1,821 tests, of which **1,120 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

@@ -166,10 +166,15 @@ class TestSealedCorpusDiscipline:
         """The other half of the guard. A gate that refuses in both states is not a gate,
         and the refusal tests above would pass against one."""
         monkeypatch.setattr("haat.runner._freeze_tag_exists", lambda: True)
+
         # It gets past the freeze check and stops on the *next* guard instead -- needing a
-        # real model -- which is what "the freeze no longer blocks it" looks like.
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        # real model -- which is what "the freeze no longer blocks it" looks like. Patched
+        # at the runner, because require_model_key reloads `.env` and a developer with a
+        # key on disk would otherwise sail past this into a real sweep.
+        def no_key() -> str:
+            raise RuntimeError("No model key found.")
+
+        monkeypatch.setattr("haat.runner.require_model_key", no_key)
         assert main(["--corpus", "sealed", "--limit", "1"]) == 2
 
 
@@ -183,9 +188,33 @@ class TestSmokeModeCannotProduceResults:
         assert "meaningless" in out
 
     def test_a_real_run_without_a_key_is_refused(self, capsys, monkeypatch) -> None:
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        """Patched at the runner rather than by deleting an env var: `require_model_key`
+        reloads `.env`, so a developer with a key on disk would silently skip this. What is
+        under test here is what the *runner* does when no provider is configured."""
+
+        def no_key() -> str:
+            raise RuntimeError("No model key found.")
+
+        monkeypatch.setattr("haat.runner.require_model_key", no_key)
         assert main(["--corpus", "visible", "--limit", "1"]) == 2
         assert "needs a real model" in capsys.readouterr().err
+
+    def test_an_openrouter_only_environment_satisfies_the_guard(self, monkeypatch) -> None:
+        """Regression. The guard used to check ANTHROPIC_API_KEY alone, so `make bench`
+        refused to start against a perfectly good OpenRouter key -- the provider the rest
+        of the project defaults to and the one the toctou probe already used. The sweep was
+        unrunnable for a reason that had nothing to do with the sweep.
+
+        Asserted through the function the runner actually calls, with only the OpenRouter
+        variable present.
+        """
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr("paynaka.env.load_env", lambda *a, **k: {})
+
+        from haat.runner import require_model_key
+
+        assert require_model_key() == "openrouter"
 
 
 class TestDefenceParity:
