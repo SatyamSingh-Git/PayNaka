@@ -29,26 +29,38 @@
 </p>
 
 > ### In one line
-> - The buying agent holds **no payment credentials**. It cannot move money — it can only *ask*.
-> - PayNaka answers in **deterministic code, never a model**. `gate.py` imports no LLM SDK, and a test fails the build the day that changes.
-> - Ask for a ₹50,000 gift card against a ₹1,999 mandate and it is **refused** — however convincingly the agent was persuaded to ask.
+> A buying agent holds **no payment credentials**. It can only *ask* PayNaka to move money —
+> and PayNaka answers with deterministic code, never a model. `gate.py` imports no LLM SDK,
+> and a test fails the build the day that stops being true.
 
 > ### Why we built it
-> - Razorpay shipped an **MCP server**: 35+ tools, any AI agent can connect and start calling them.
-> - Then switched off the ones that move money **out**. `create_refund` and `create_instant_settlement` run locally, **not remotely**.
-> - **The payment company built the agent interface — and could not turn on the part that pays.**
-> - That was the right call. Prompt hardening is a *probabilistic* defence against an attacker with *unlimited* attempts. It holds until it doesn't, and you find out from a ledger.
-> - So the boundary got drawn by hand, because **there was no mechanism to draw it automatically**.
-> - Every merchant on the platform inherits that switched-off boundary today. Agentic commerce arrives with refunds disabled.
-> - **PayNaka is the missing mechanism.** Not a better prompt — a checkpoint that holds the keys, checks each request against what the shopper signed, and refuses in arithmetic.
-> - A refund outside the mandate does not become *unlikely*. It becomes **impossible**.
-> - **The point of this project is to switch those tools back on.**
+> Razorpay is betting on agentic commerce. Its remote MCP server hands 35+ tools to any AI
+> agent that connects — and then **switches off the ones that move money out**.
+> `create_refund` and `create_instant_settlement` work locally and not remotely.
+>
+> Read that again, because it is the whole reason this project exists: *the payment company
+> built the agent interface, and could not turn on the part that pays.*
+>
+> That was the right call. An agent reads text from the internet, text from the internet can
+> contain instructions, and no amount of prompt hardening makes a probabilistic defence
+> reliable against an adversary with unlimited attempts. Faced with that, engineers who
+> understood the risk drew a boundary by hand — because there was no mechanism to draw it
+> automatically.
+>
+> **PayNaka is that mechanism.** Not a better prompt, not a smarter model: a checkpoint that
+> holds the credentials, checks every request against what the shopper actually signed, and
+> refuses in arithmetic. Refunds become safe to expose because a refund outside the mandate
+> cannot happen — not "is unlikely to".
+>
+> Every merchant on the platform inherits that switched-off boundary today. **The point of
+> this project is to switch it back on.**
 
 > ### What we refuse to claim
-> - Prompt injection is **not solved here**, and anyone claiming otherwise is selling something.
-> - Nobody can promise a model will not be persuaded. **We do not try.**
-> - We make persuasion **not enough**: a persuaded agent still cannot move money outside what was signed.
-> - Those are two different claims. **Only the second is made anywhere in this repository.**
+> Prompt injection is **not** solved here, and anyone telling you otherwise is selling
+> something. Nobody can promise a model will not be persuaded. PayNaka does not try — it
+> makes persuasion *not enough*: a persuaded agent still cannot move money outside what was
+> signed. Those are different claims, and only the second one is made anywhere in this
+> repository.
 
 ---
 
