@@ -28,40 +28,42 @@
   <a href="docs/THREATMODEL.md"><b>What it does not defend</b></a>
 </p>
 
-A buying agent holds **no payment credentials**. It can only *request* a payment — PayNaka
-alone decides whether money moves, using deterministic code, never a model. `gate.py` imports
-no LLM SDK, and CI fails the moment that invariant is broken.
+### What we built, in one line
+
+> A buying agent holds **no payment credentials**. It can only *request* a payment — PayNaka
+> alone decides whether money moves, using deterministic code, never a model. `gate.py`
+> imports no LLM SDK, and CI fails the moment that invariant is broken.
 
 ### Why we built it
 
-* Razorpay is already betting on agentic commerce. Its remote MCP server gives an AI agent
-  35+ tools — then **disables the tools that actually move money out**. `create_refund` and
-  `create_instant_settlement` work locally, but not remotely.
-
-* That boundary is the reason PayNaka exists. Razorpay built the interface for agents to
-  operate payments, but could not safely expose the part that *pays*. And rightly so: an
-  agent reads untrusted text from the internet; that text can contain instructions; and
-  prompt hardening cannot turn a probabilistic model into a security boundary.
-
-* **PayNaka makes that boundary programmable.** The agent never gets the credentials.
-  PayNaka holds them, verifies every request against exactly what the shopper signed, and
-  enforces the result in deterministic code. A refund outside the mandate does not become
-  *unlikely* — it becomes **impossible through the payment gate**.
-
-* Every merchant inherits a switched-off boundary today. **PayNaka is built to switch it
-  back on — safely.**
+> * Razorpay is already betting on agentic commerce. Its remote MCP server gives an AI agent
+>   35+ tools — then **disables the tools that actually move money out**. `create_refund` and
+>   `create_instant_settlement` work locally, but not remotely.
+>
+> * That boundary is the reason PayNaka exists. Razorpay built the interface for agents to
+>   operate payments, but could not safely expose the part that *pays*. And rightly so: an
+>   agent reads untrusted text from the internet; that text can contain instructions; and
+>   prompt hardening cannot turn a probabilistic model into a security boundary.
+>
+> * **PayNaka makes that boundary programmable.** The agent never gets the credentials.
+>   PayNaka holds them, verifies every request against exactly what the shopper signed, and
+>   enforces the result in deterministic code. A refund outside the mandate does not become
+>   *unlikely* — it becomes **impossible through the payment gate**.
+>
+> * Every merchant inherits a switched-off boundary today. **PayNaka is built to switch it
+>   back on — safely.**
 
 ### What we refuse to claim
 
-Prompt injection is **not solved here**. PayNaka does not try to make a model impossible to
-persuade; it makes persuasion **insufficient**.
-
-Compromise the agent. Inject the prompt. Convince the model.
-
-It still cannot move money outside the signed mandate.
-
-That is the security guarantee this repository makes — and no stronger one. Anyone telling
-you otherwise is selling something else.
+> Prompt injection is **not solved here**. PayNaka does not try to make a model impossible to
+> persuade; it makes persuasion **insufficient**.
+>
+> Compromise the agent. Inject the prompt. Convince the model.
+>
+> **It still cannot move money outside the signed mandate.**
+>
+> That is the security guarantee this repository makes — and no stronger one. Anyone telling
+> you otherwise is selling something else.
 
 ---
 
