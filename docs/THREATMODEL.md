@@ -431,6 +431,33 @@ Two rules — `override_previous` and `tool_name` — never fire on the measured
 so contributed nothing to the 92.1%. They are named as such in the test suite rather than
 left in the file to make the rule list look longer than it is.
 
+### The sentinel generalises poorly, measured
+
+The held-out families were scored once, at `v1.0-freeze`, and the result is a 27.7-point
+drop:
+
+| | Recall |
+|---|---:|
+| visible families -- the corpus the rules were read from | 92.1% (232/252) |
+| **sealed families -- never seen** | **64.4% (58/90)** |
+| `obfuscated_payload` | 72.9% (35/48) |
+| `tool_call_smuggling` | **54.8% (23/42)** |
+
+False positives stayed at 0/100 on both, which says the rules are specific. Recall says
+they are not general. That is the expected shape for keyword-and-structure matching meeting
+text it was not fitted to, and it is the reason the visible number was never quoted on its
+own.
+
+The detector has not been adjusted since these numbers existed. There is no second held-out
+set, so tuning against this one would destroy the only evidence of generalisation this
+project has and leave nothing able to detect that it had.
+
+What it does **not** change: the gate's guarantee. `gate.py` does not import
+`paynaka.sentinel`, a flag never blocks anything, and the two attacks this project leads
+with -- a repricing window and a duplicate webhook -- involve no suspicious text for any
+detector to notice. A 64% layer two is a weak layer two. It is not a weak checkpoint,
+because the checkpoint was never asked to depend on it.
+
 ### Compromise of the signing key or the gate process
 
 Whoever holds the private key can mint mandates. Whoever can write to the gate's memory

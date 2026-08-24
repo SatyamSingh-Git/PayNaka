@@ -302,10 +302,31 @@ their shopping assistant, someone chasing a refund. Several land within one sign
 threshold, and the closest scored 45 of 50. A zero false-positive rate says nothing about
 how nearly it happened; the margin is that number.
 
-Recall against the two **sealed** families is unmeasured, deliberately. The rules were
-written by reading the visible corpus, so the held-out set is the only evidence any of it
-generalises — and that evidence spends once. `make sentinel-sealed` refuses to run before
-the freeze tag exists.
+**The held-out set has now been spent, and it went badly.** The rules were written by
+reading the visible corpus, so the two sealed families were the only evidence any of it
+generalises. `v1.0-freeze` is cut; `make sentinel-sealed` scored them once:
+
+| | Recall |
+| --- | ---: |
+| visible families — what the rules were written against | 92.1% (232/252) |
+| **sealed families — never seen** | **64.4% (58/90)** |
+| — `obfuscated_payload` | 72.9% (35/48) |
+| — `tool_call_smuggling` | **54.8% (23/42)** |
+| false positives, both | **0.0% (0/100)** |
+
+**A 27.7-point drop.** On one held-out family the detector is barely better than a coin.
+That is the honest measurement of a keyword-and-structure heuristic meeting text it was not
+fitted to, and it is what the visible 92.1% was always at risk of concealing.
+
+The detector has not been touched since. Tuning it now would turn the held-out set into
+just another fitted one, and there is no second held-out set to catch that.
+
+**Read what this does and does not say about the system.** If PayNaka's guarantee rested on
+detection, a 64% detector would be the whole story and the story would be bad. It does not.
+`gate.py` never imports the sentinel, a flag never blocks anything, and every attack in the
+sections above is stopped by a mandate check that does not care whether anything looked
+suspicious. This is the number that shows why the detector is layer two — and it is exactly
+the number a project that led with its detector would have had every reason not to run.
 
 Corpus diversity, measured and published regardless:
 

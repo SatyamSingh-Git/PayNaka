@@ -66,6 +66,9 @@ the structural checks catch families they never saw — because taking money sti
 violating the mandate — that is a real result.
 
 `make bench-sealed` refuses to run before the `v1.0-freeze` tag exists, and says why.
+That tag is now cut, and the sentinel half of the sealed evidence has been spent: 64.4%
+recall on the held-out families against 92.1% on the visible ones. It is reported in the
+README beside the visible number rather than instead of it.
 Running them early would quietly turn a held-out set into a development set.
 
 A test asserts the sealed families target the *same* money outcomes as the visible ones.
