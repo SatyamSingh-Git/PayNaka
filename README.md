@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1966 tests" src="https://img.shields.io/badge/tests-1966-2F6B4F?style=flat-square">
-  <img alt="1243 adversarial" src="https://img.shields.io/badge/adversarial-1243-2F6B4F?style=flat-square">
+  <img alt="2003 tests" src="https://img.shields.io/badge/tests-2003-2F6B4F?style=flat-square">
+  <img alt="1280 adversarial" src="https://img.shields.io/badge/adversarial-1280-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -615,7 +615,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,966 tests, of which **1,243 are adversarial**. 88% branch coverage on `paynaka/`,
+2,003 tests, of which **1,280 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

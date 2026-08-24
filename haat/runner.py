@@ -36,6 +36,7 @@ from buyer.brains import Brain, ScriptedBrain, build_brain
 from buyer.tools import ToolBox
 from haat.defences import DEFENCE_NAMES, build_defence
 from haat.report import write_results
+from haat.runlock import RunLock, RunStamp, SweepConflict
 from haat.schema import AttackCase, BenignCase, RunResult, load_corpus
 from merchant.app import reset_catalog
 from merchant.catalog import Review, find
@@ -362,6 +363,12 @@ def _model_name(config: RunConfig) -> str:
 def run_corpus(config: RunConfig) -> list[RunResult]:
     config.out_dir.mkdir(parents=True, exist_ok=True)
     jsonl = config.out_dir / f"{config.corpus}.jsonl"
+    stamp = RunStamp(
+        corpus=config.corpus,
+        defences=tuple(config.defences),
+        kind=config.kind,
+        model=_model_name(config),
+    )
     already = _completed(jsonl, _model_name(config))
 
     pending = [job for job in _jobs(config) if (job[1].case_id, job[2]) not in already]
@@ -418,7 +425,10 @@ def run_corpus(config: RunConfig) -> list[RunResult]:
 
     # The agent path is I/O bound on the model API, and every case builds its own stack,
     # so threads are enough and processes would only add serialisation cost.
+    # The lock is taken before the first model call, because the point of refusing is to
+    # refuse while the provider quota is still intact.
     with (
+        RunLock(jsonl, stamp),
         ThreadPoolExecutor(max_workers=config.workers) as pool,
         jsonl.open("a", encoding="utf-8") as sink,
     ):
@@ -545,7 +555,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     started = time.perf_counter()
-    results = run_corpus(config)
+    try:
+        results = run_corpus(config)
+    except SweepConflict as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 1
     elapsed = time.perf_counter() - started
     print(f"\n{len(results)} runs in {elapsed:.1f}s")
     if config.kind != "all" or config.limit or set(defences) != set(DEFENCE_NAMES):

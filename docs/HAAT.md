@@ -4,6 +4,35 @@ A *haat* is a marketplace. HAAT is 540 cases that measure whether a money-moving
 be talked out of its budget, and whether a defence stops it without stopping the customer.
 
 
+## One sweep per results file
+
+A results file is the evidence. A file that can be quietly wrong is therefore the worst
+failure this harness has, and on 24 August it had one.
+
+Two runners with different `--defences` appended to a single JSONL for an hour. A wrapper
+process had been killed and the Python beneath it had not, so a sweep everybody believed
+was dead kept writing. The output was valid JSON with plausible ids and sensible verdicts,
+and it was a silent mixture of two configurations -- 432 rows for a 252-case corpus, benign
+cases in a run that asked for attacks only, a defence nobody requested. It also spent the
+day's entire free-tier quota.
+
+Nothing detected it. Model-keyed resume catches a *model* change and cannot see two runs of
+the same model with different defences, and neither can a reader.
+
+`haat/runlock.py` closes it with two guards, both taken **before the first model call** so a
+refusal costs nothing:
+
+| Guard | Refuses |
+|---|---|
+| a PID lock, created exclusively | a second runner while the first is alive |
+| a configuration stamp | resuming with a different corpus, defence set, kind or model |
+
+A lock whose owner is gone is stale and gets taken over, out loud. Requiring somebody to
+know about lock files at 2 a.m. is how a guard gets deleted -- and the liveness check needed
+its own Windows path, because `os.kill(pid, 0)` is a POSIX idiom that reads every dead
+process on Windows as alive, which would have made a crashed sweep block its own retry
+for ever.
+
 ## The TOCTOU probe subjects
 
 Five models, five labs, chosen to spread across capability rather than to find a
