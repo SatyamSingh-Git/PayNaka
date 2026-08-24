@@ -13,15 +13,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 from merchant.app import reset_catalog
-from paynaka.app import AUTHORISED, GIFT, app
+from paynaka.app import AUTHORISED, GIFT, app, hub
+from paynaka.identity import TokenRegistry
 
 pytestmark = pytest.mark.integration
+
+
+#: A credential installed into the running app, so the MCP tests do not depend on
+#: whatever the developer happens to have in their environment or in `.env`.
+AGENT_TOKEN = "integration-test-token-long-enough"
+AUTH = {"Authorization": f"Bearer {AGENT_TOKEN}"}
 
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     reset_catalog()
     with TestClient(app) as c:
+        # After startup, because `hub.open()` rebuilds the registry from the environment.
+        hub.callers = TokenRegistry({"integration-test": AGENT_TOKEN})
         yield c
     reset_catalog()
 
@@ -97,7 +106,7 @@ class TestAuditSurface:
 class TestMcpEndpoint:
     def test_tools_list_over_http(self, client: TestClient) -> None:
         response = client.post(
-            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=AUTH
         ).json()
         names = {t["name"] for t in response["result"]["tools"]}
         assert "create_refund" in names
@@ -111,19 +120,105 @@ class TestMcpEndpoint:
                 "method": "tools/call",
                 "params": {"name": "create_order", "arguments": {"amount": 100}},
             },
-            headers={"mcp-session-id": "fresh"},
+            headers={**AUTH, "mcp-session-id": "fresh"},
         ).json()
         assert response["error"]["code"] == -32001
 
     def test_malformed_json_is_a_400_not_a_500(self, client: TestClient) -> None:
         response = client.post(
-            "/mcp", content=b"{not json", headers={"content-type": "application/json"}
+            "/mcp", content=b"{not json", headers={**AUTH, "content-type": "application/json"}
         )
         assert response.status_code == 400
 
     def test_a_notification_returns_no_body(self, client: TestClient) -> None:
-        response = client.post("/mcp", json={"jsonrpc": "2.0", "method": "tools/list"})
+        response = client.post(
+            "/mcp", json={"jsonrpc": "2.0", "method": "tools/list"}, headers=AUTH
+        )
         assert response.json() is None
+
+
+class TestTheAskingSurfaceIsAuthenticated:
+    """Taking the credentials away from the agent buys nothing while the surface it asks
+    through is open to everyone. These are the tests for that half of the claim."""
+
+    def test_an_unauthenticated_call_is_refused(self, client: TestClient) -> None:
+        response = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        assert response.status_code == 401
+
+    def test_the_refusal_tells_the_client_how_to_authenticate(self, client: TestClient) -> None:
+        """A 401 without ``WWW-Authenticate`` is a 401 no client knows how to answer."""
+        response = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        assert response.headers["www-authenticate"].startswith("Bearer")
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            {},
+            {"Authorization": ""},
+            {"Authorization": "Bearer"},
+            {"Authorization": f"Basic {AGENT_TOKEN}"},
+            {"Authorization": "Bearer wrong-but-long-enough-to-be-plausible"},
+            {"Authorization": f"Bearer {AGENT_TOKEN[:-1]}"},
+            {"Authorization": f"Bearer {AGENT_TOKEN} "},
+        ],
+        ids=["absent", "empty", "no-token", "wrong-scheme", "wrong", "prefix", "padded"],
+    )
+    def test_every_way_of_getting_it_wrong_is_a_401(
+        self, client: TestClient, header: dict[str, str]
+    ) -> None:
+        response = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "create_order", "arguments": {"amount": 100}},
+            },
+            headers=header,
+        )
+        assert response.status_code == 401
+
+    def test_a_refused_call_never_reaches_the_gate(self, client: TestClient) -> None:
+        """An unauthenticated request is not a denied money request. It is not a money
+        request at all, so it must leave no decision, no event and no audit record."""
+        before_records = client.get("/api/audit").json()["count"]
+        before_events = len(client.get("/api/events").json()["events"])
+        client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "create_order", "arguments": {"amount": 5_000_000}},
+            },
+        )
+        assert client.get("/api/audit").json()["count"] == before_records
+        assert len(client.get("/api/events").json()["events"]) == before_events
+
+    def test_the_refusal_does_not_leak_the_expected_credential(self, client: TestClient) -> None:
+        response = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Authorization": "Bearer wrong-but-long-enough-to-be-plausible"},
+        )
+        assert AGENT_TOKEN not in response.text
+        assert AGENT_TOKEN not in str(dict(response.headers))
+
+    def test_the_event_names_the_caller_not_the_credential(self, client: TestClient) -> None:
+        """ "Which agent asked" is an audit question, and a session id does not answer it."""
+        client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "create_order", "arguments": {"amount": 100}},
+            },
+            headers={**AUTH, "mcp-session-id": "named"},
+        )
+        calls = [e for e in client.get("/api/events").json()["events"] if e["kind"] == "mcp.call"]
+        assert calls and calls[-1]["caller"] == "integration-test"
+        assert AGENT_TOKEN not in str(calls)
 
 
 class TestPolicySurface:

@@ -36,6 +36,7 @@ from paynaka.audit import AuditChain
 from paynaka.clock import FrozenClock
 from paynaka.engine import PayNaka
 from paynaka.env import load_env
+from paynaka.identity import Caller, TokenRegistry, Unauthenticated
 from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
 from paynaka.money import format_inr
 from paynaka.policy import Policy
@@ -76,6 +77,11 @@ class Hub:
         """
         self.clock = FrozenClock.at_ist(DEMO_CLOCK)
         self.signer = MandateSigner(generate_keypair()[0])
+        # Built at startup, so a malformed or weak credential configuration is a failure
+        # to boot rather than a 500 on the first money call. With nothing configured and
+        # the simulated rail this mints a development credential; in front of a real rail
+        # it refuses, and the service does not come up.
+        self.callers = TokenRegistry.from_env()
         self.state = SqliteState(":memory:", clock=self.clock)
         self.audit = AuditChain(":memory:", clock=self.clock)
         self.policy = Policy.from_yaml("policy.yaml")
@@ -148,9 +154,31 @@ app.add_middleware(
 
 
 # ====================================================================== mcp
+def authenticated(request: Request) -> Caller:
+    """Identify the caller, or refuse the request before it reaches the gate.
+
+    Taking payment credentials away from the agent buys nothing while the surface it asks
+    through is open to every caller. So this runs first, and a failure here never reaches
+    ``McpProxy`` at all -- an unauthenticated request is not a denied money request, it is
+    not a money request.
+
+    ``WWW-Authenticate`` is set because a 401 without it is a 401 no client knows how to
+    answer, and the detail is deliberately the same sentence for every failure mode.
+    """
+    try:
+        return hub.callers.authenticate(request.headers.get("authorization"))
+    except Unauthenticated as exc:
+        raise HTTPException(
+            status_code=401,
+            detail=str(exc),
+            headers={"WWW-Authenticate": 'Bearer realm="paynaka"'},
+        ) from exc
+
+
 @app.post("/mcp")
 async def mcp(request: Request) -> dict[str, Any] | None:
     """The endpoint an agent points at instead of Razorpay's."""
+    caller = authenticated(request)
     try:
         body = await request.json()
     except (json.JSONDecodeError, ValueError) as exc:
@@ -165,6 +193,9 @@ async def mcp(request: Request) -> dict[str, Any] | None:
             {
                 "tool": (body.get("params") or {}).get("name"),
                 "session": session_id,
+                # The name, never the credential. "which agent asked" is an audit
+                # question, and a session id does not answer it.
+                "caller": caller.name,
                 "ok": bool(response and "error" not in response),
             },
         )

@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1296 tests" src="https://img.shields.io/badge/tests-1296-2F6B4F?style=flat-square">
-  <img alt="885 adversarial" src="https://img.shields.io/badge/adversarial-885-2F6B4F?style=flat-square">
+  <img alt="1434 tests" src="https://img.shields.io/badge/tests-1434-2F6B4F?style=flat-square">
+  <img alt="996 adversarial" src="https://img.shields.io/badge/adversarial-996-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -82,13 +82,24 @@ PayNaka speaks MCP on both sides. Point any existing agent at it instead of `mcp
     "mcpServers": {
       "razorpay": {
 -       "url": "https://mcp.razorpay.com/mcp"
-+       "url": "http://127.0.0.1:8002/mcp"
++       "url": "http://127.0.0.1:8002/mcp",
++       "headers": { "Authorization": "Bearer ${PAYNAKA_AGENT_TOKEN}" }
       }
     }
   }
 ```
 
-No SDK, no rewrite, no code change in the agent. Same tool names, same schemas.
+One URL and one header. No SDK, no rewrite, no change to the agent's *code* — same tool
+names, same schemas.
+
+The header is not optional, and that is the point. "The agent holds no payment
+credentials" buys nothing while the surface it asks through is open to anything that can
+open a socket, so `/mcp` authenticates every call and there is no switch that turns the
+check off. Configure `PAYNAKA_AGENT_TOKENS=name:token`; the name is what the audit trail
+records, because *which agent asked* is an audit question a session id does not answer.
+With nothing configured the service mints a development credential rather than admitting
+everyone — the check stays live, only the origin of the credential changes — and with a
+real rail configured it refuses to start without one.
 
 ## The demo
 
@@ -361,7 +372,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,296 tests, of which **885 are adversarial**. 88% branch coverage on `paynaka/`,
+1,434 tests, of which **996 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?
@@ -389,6 +400,7 @@ Every defect below was found by this suite and is now pinned as a named regressi
 | property tests | one line item with `qty=-1` crashed the engine while writing the audit record **for its own denial** — a one-field denial of service |
 | property tests | checks were evaluated eagerly, so a later check that raised overrode an earlier clean denial |
 | circuit breaker | revoking a *subject* did nothing, because `check_revoked` only ever looked at the mandate id and the session — a revocation nothing checks is not a revocation |
+| adversarial | a non-ASCII byte in the `Authorization` header was an unhandled `TypeError` on the auth path — a 500 where a 401 belongs, reachable before any credential is known |
 
 ```bash
 make check                          # ruff, mypy --strict, pytest, gitleaks

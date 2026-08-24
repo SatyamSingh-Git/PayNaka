@@ -50,6 +50,52 @@ duplicate-JSON-key smuggling, type confusion, unknown-field injection, oversize
 allow-lists, and mandates stamped in the future or valid for a year — all refused, all
 tested.
 
+### An unauthenticated caller reaching the asking surface
+
+"The agent holds no payment credentials, it can only ask" is the design's first move, and
+it is worth nothing if *anything* able to open a socket to the service is the agent. Taking
+keys away from one caller is not containment while the surface it asks through is open to
+every caller. The credential split and the authenticated surface are one argument; either
+alone is decorative.
+
+So `paynaka/identity.py` authenticates every call to `/mcp`, and three of its decisions are
+each the opposite of an easier convenience:
+
+**There is no unauthenticated path, not even in development.** The tempting shape is a check
+that switches off when nothing is configured, so the demo works out of the box — which is a
+bypass, and a bypass is what an attacker looks for first. With nothing configured the
+service *mints* a development credential into `var/` instead, the same pattern already used
+for the dev signing key. The check is always live; only the origin of the credential
+changes.
+
+**The generated credential is refused the moment the rail is real.** `PAYNAKA_RAIL=test`
+reaches Razorpay over the network. A token invented at boot is acceptable in front of an
+in-process simulator and is not acceptable in front of anything that settles, so the service
+refuses to start.
+
+**A weak or ambiguous configuration is a startup failure.** Under 24 characters is refused.
+Two callers sharing one token is refused, because an audit record could not then say which
+of them acted. A malformed entry is never silently dropped — a dropped entry is a caller who
+cannot authenticate for a reason nothing reported.
+
+Comparison is constant-time over bytes, and every registered credential is compared on
+every attempt: returning early on the first match would leak, through timing, which caller a
+guess was closest to. Every failure mode returns one identical message, because
+distinguishing "no header" from "wrong token" tells a prober which half of the guess was
+right.
+
+A refused call is not a denied money request. It is not a money request: it never reaches
+the gate, and leaves no decision, no event and no audit record. That is asserted rather than
+assumed.
+
+The audit trail records the caller's *name*, because "which agent asked" is a question a
+session id does not answer.
+
+Its limit, stated: this is a shared secret, so it authenticates the process, not the
+reasoning inside it. A compromised agent holding a valid credential is still a compromised
+agent with a valid credential — which is the whole reason the mandate exists downstream of
+this check rather than instead of it.
+
 ### Money-correctness failures with no attacker at all
 
 Duplicate webhooks, over-refunds accumulating across partials, retries past NPCI's cap,
