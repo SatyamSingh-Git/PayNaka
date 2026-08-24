@@ -17,6 +17,7 @@ able to audit the ledger by hand, without running our code and taking its word f
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ from typing import Any, Final, Self
 from paynaka.clock import IST, Clock
 from paynaka.money import MoneyError, to_paise
 
-__all__ = ["IdempotencyRecord", "SqliteState", "StateError"]
+__all__ = ["Escalation", "IdempotencyRecord", "SqliteState", "StateError"]
 
 _SCHEMA: Final[str] = """
 CREATE TABLE IF NOT EXISTS nonces (
@@ -102,11 +103,88 @@ CREATE TABLE IF NOT EXISTS revocations (
     scope      TEXT PRIMARY KEY,
     revoked_at INTEGER NOT NULL
 );
+
+-- A money action waiting for a human, and the record of what the human said.
+--
+-- Bound to `request_hash`, not to the amount or the session: an approval names one exact
+-- request. Otherwise "yes to Rs 3,000" becomes reusable authority, which is the shape of
+-- every replay bug in this file.
+--
+-- Single-use, enforced by the state column rather than by a flag: the transition
+-- 'approved' -> 'consumed' is one guarded UPDATE, so two concurrent retries cannot both
+-- find an approval and both spend it.
+--
+-- `expires_at` is checked at every read that matters rather than swept by a background
+-- job. A sweeper that has not run yet is an approval that outlives its window, and the
+-- policy says an unanswered escalation resolves to DENY.
+CREATE TABLE IF NOT EXISTS escalations (
+    id           TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    mandate_id   TEXT NOT NULL,
+    session_id   TEXT NOT NULL,
+    subject      TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    amount       INTEGER NOT NULL CHECK (amount > 0),
+    summary_json TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    expires_at   INTEGER NOT NULL,
+    state        TEXT NOT NULL
+                 CHECK (state IN ('pending', 'approved', 'denied', 'consumed')),
+    decided_at   INTEGER,
+    decided_by   TEXT
+);
+CREATE INDEX IF NOT EXISTS escalations_hash ON escalations (request_hash, state);
+CREATE INDEX IF NOT EXISTS escalations_state ON escalations (state, expires_at);
 """
 
 
 class StateError(Exception):
     """A state operation could not be completed safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class Escalation:
+    """A money action waiting for a human, or the record of what they decided."""
+
+    id: str
+    request_hash: str
+    mandate_id: str
+    session_id: str
+    subject: str
+    action: str
+    amount: int
+    summary: dict[str, Any]
+    created_at: int
+    expires_at: int
+    state: str
+    decided_at: int | None = None
+    decided_by: str | None = None
+
+    def is_expired(self, now: int) -> bool:
+        """Expiry is a property of the clock, not of the stored state.
+
+        A row still reading 'pending' past its window has expired whether or not anything
+        has got round to updating it, and every caller here asks this question rather than
+        trusting the column.
+        """
+        return now >= self.expires_at
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "request_hash": self.request_hash,
+            "mandate_id": self.mandate_id,
+            "session_id": self.session_id,
+            "subject": self.subject,
+            "action": self.action,
+            "amount": self.amount,
+            "summary": self.summary,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+            "state": self.state,
+            "decided_at": self.decided_at,
+            "decided_by": self.decided_by,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,3 +606,218 @@ class SqliteState:
     def unrevoke(self, scope: str) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM revocations WHERE scope = ?", (scope,))
+
+    # ---------------------------------------------------------------- escalations
+    def open_escalation(
+        self,
+        *,
+        escalation_id: str,
+        request_hash: str,
+        mandate_id: str,
+        session_id: str,
+        subject: str,
+        action: str,
+        amount: int,
+        summary: dict[str, Any],
+        timeout_seconds: int,
+        clock: Clock | None = None,
+    ) -> Escalation:
+        """Open an escalation for this request, or return the one already open for it.
+
+        Idempotent on ``request_hash``, which matters more than it looks. A duplicate
+        webhook delivery for the same above-threshold action must not put a second
+        approval in somebody's queue: two rows for one request means a human can approve
+        it twice, and the second approval is authority nobody granted twice.
+
+        A previously-decided or expired escalation does not block a new one. The old
+        answer was about a window that has closed; asking again is correct, and the audit
+        chain still carries the earlier record.
+        """
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount <= 0:
+            raise StateError(f"an escalation needs positive int paise, got {amount!r}")
+        if not escalation_id or not request_hash:
+            raise StateError("an escalation needs an id and a request hash")
+        if timeout_seconds <= 0:
+            raise StateError("an escalation timeout must be positive")
+
+        now = self._now(clock)
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT * FROM escalations
+                 WHERE request_hash = ? AND state = 'pending' AND expires_at > ?
+                 ORDER BY created_at DESC LIMIT 1
+                """,
+                (request_hash, now),
+            ).fetchone()
+            if row is not None:
+                return _as_escalation(row)
+
+            self._conn.execute(
+                """
+                INSERT INTO escalations (
+                    id, request_hash, mandate_id, session_id, subject, action, amount,
+                    summary_json, created_at, expires_at, state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (
+                    escalation_id,
+                    request_hash,
+                    mandate_id,
+                    session_id,
+                    subject,
+                    action,
+                    amount,
+                    json.dumps(summary, sort_keys=True, default=str),
+                    now,
+                    now + timeout_seconds,
+                ),
+            )
+            fresh = self._conn.execute(
+                "SELECT * FROM escalations WHERE id = ?", (escalation_id,)
+            ).fetchone()
+        return _as_escalation(fresh)
+
+    def decide_escalation(
+        self, escalation_id: str, *, approve: bool, by: str, clock: Clock | None = None
+    ) -> str | None:
+        """Record a human's answer. Returns the new state, or ``None`` if it did not apply.
+
+        One guarded ``UPDATE``, so the first answer wins and a second changes nothing:
+        approve-then-deny and two simultaneous approvals both resolve to exactly one
+        decision. ``None`` covers every reason for no -- unknown id, already decided,
+        expired -- because the caller's question is "did my answer land", and an approver
+        does not need those distinguished.
+
+        The window is checked here as well as at consumption. An approval granted after
+        the window closed would otherwise sit in the table looking valid.
+        """
+        if not escalation_id or not by:
+            raise StateError("a decision needs an escalation id and an approver")
+
+        now = self._now(clock)
+        target = "approved" if approve else "denied"
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE escalations
+                   SET state = ?, decided_at = ?, decided_by = ?
+                 WHERE id = ? AND state = 'pending' AND expires_at > ?
+                """,
+                (target, now, by, escalation_id, now),
+            )
+        return target if cursor.rowcount == 1 else None
+
+    def consume_approval(self, request_hash: str, *, clock: Clock | None = None) -> str | None:
+        """Spend a human approval for exactly this request. Returns its id, or ``None``.
+
+        The most security-relevant statement in this file after :meth:`consume_nonce`.
+        Three properties, all in the ``WHERE`` clause rather than in a caller's discipline:
+
+        * **Bound to the request.** ``request_hash`` covers the whole body, so an approval
+          for one order cannot release a different order of the same amount.
+        * **Single-use.** The transition is guarded on the current state, so two concurrent
+          retries cannot both spend one approval.
+        * **Still inside its window.** ``on_timeout`` is DENY and not configurable, so an
+          approval whose window closed is not an approval.
+        """
+        if not request_hash:
+            return None
+
+        now = self._now(clock)
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT id FROM escalations
+                 WHERE request_hash = ? AND state = 'approved' AND expires_at > ?
+                 ORDER BY decided_at ASC LIMIT 1
+                """,
+                (request_hash, now),
+            ).fetchone()
+            if row is None:
+                return None
+            claimed = str(row["id"])
+            cursor = self._conn.execute(
+                """
+                UPDATE escalations SET state = 'consumed'
+                 WHERE id = ? AND state = 'approved' AND expires_at > ?
+                """,
+                (claimed, now),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return claimed
+
+    def escalation(self, escalation_id: str) -> Escalation | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM escalations WHERE id = ?", (escalation_id,)
+            ).fetchone()
+        return _as_escalation(row) if row is not None else None
+
+    def pending_escalations(self, *, clock: Clock | None = None) -> list[Escalation]:
+        """Everything still awaiting a human and still inside its window.
+
+        Expired rows are excluded by the query rather than by the reader, so an operator
+        console cannot show an approve button for something that already resolved to DENY.
+        """
+        now = self._now(clock)
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM escalations
+                 WHERE state = 'pending' AND expires_at > ?
+                 ORDER BY created_at ASC
+                """,
+                (now,),
+            ).fetchall()
+        return [_as_escalation(row) for row in rows]
+
+    def expired_escalations(self, *, clock: Clock | None = None) -> list[Escalation]:
+        """Escalations whose window closed with nobody answering.
+
+        These are DENY by policy. They are surfaced rather than deleted because "nobody
+        approved this in time" is exactly the sort of thing an operator should be able to
+        count, and a silently-dropped row cannot be counted.
+        """
+        now = self._now(clock)
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM escalations
+                 WHERE state = 'pending' AND expires_at <= ?
+                 ORDER BY expires_at ASC
+                """,
+                (now,),
+            ).fetchall()
+        return [_as_escalation(row) for row in rows]
+
+
+def _as_escalation(row: sqlite3.Row) -> Escalation:
+    """Map a row, tolerating a summary that will not parse.
+
+    A malformed summary is display data, not authority. Refusing to return the escalation
+    because its human-readable blurb is broken would turn a cosmetic defect into an
+    approval nobody can act on.
+    """
+    try:
+        summary = json.loads(row["summary_json"])
+        if not isinstance(summary, dict):
+            summary = {"raw": summary}
+    except (TypeError, ValueError):
+        summary = {}
+    return Escalation(
+        id=str(row["id"]),
+        request_hash=str(row["request_hash"]),
+        mandate_id=str(row["mandate_id"]),
+        session_id=str(row["session_id"]),
+        subject=str(row["subject"]),
+        action=str(row["action"]),
+        amount=int(row["amount"]),
+        summary=summary,
+        created_at=int(row["created_at"]),
+        expires_at=int(row["expires_at"]),
+        state=str(row["state"]),
+        decided_at=None if row["decided_at"] is None else int(row["decided_at"]),
+        decided_by=None if row["decided_by"] is None else str(row["decided_by"]),
+    )

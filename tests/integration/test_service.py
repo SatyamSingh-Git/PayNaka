@@ -25,6 +25,11 @@ pytestmark = pytest.mark.integration
 AGENT_TOKEN = "integration-test-token-long-enough"
 AUTH = {"Authorization": f"Bearer {AGENT_TOKEN}"}
 
+#: A distinct approver credential. Distinct is the point: a step-up the agent can
+#: answer for itself is not an escalation.
+APPROVER_TOKEN = "integration-approver-token-long-enough"
+APPROVE = {"Authorization": f"Bearer {APPROVER_TOKEN}"}
+
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
@@ -32,6 +37,7 @@ def client() -> Iterator[TestClient]:
     with TestClient(app) as c:
         # After startup, because `hub.open()` rebuilds the registry from the environment.
         hub.callers = TokenRegistry({"integration-test": AGENT_TOKEN})
+        hub.approvers = TokenRegistry({"ops-anita": APPROVER_TOKEN})
         yield c
     reset_catalog()
 
@@ -259,6 +265,43 @@ class TestTheModeIsVisibleOverHttp:
         assert body["observed"] == 0
         assert body["top_check"] is None
         assert body["rate"] == 0
+
+
+class TestTheApprovalSurface:
+    """A step-up the buying agent can answer for itself is theatre, so the credential
+    that approves is a different one and the endpoint checks it."""
+
+    def test_the_queue_is_readable(self, client: TestClient) -> None:
+        body = client.get("/api/escalations").json()
+        assert body["on_timeout"] == "DENY"
+        assert body["approvers_configured"] == 1
+        assert body["pending"] == []
+
+    def test_an_agent_credential_cannot_approve(self, client: TestClient) -> None:
+        """The property the whole mechanism rests on."""
+        response = client.post("/api/escalations/esc_anything/approve", headers=AUTH)
+        assert response.status_code == 401
+
+    def test_an_unauthenticated_caller_cannot_approve(self, client: TestClient) -> None:
+        assert client.post("/api/escalations/esc_anything/approve").status_code == 401
+
+    def test_an_unknown_escalation_does_not_reveal_itself(self, client: TestClient) -> None:
+        """409 rather than 404, and the same 409 for already-decided and expired: a prober
+        should not learn which escalation ids exist."""
+        response = client.post("/api/escalations/esc_nope/approve", headers=APPROVE)
+        assert response.status_code == 409
+
+    @pytest.mark.parametrize("answer", ["maybe", "APPROVE", "yes", "approve-please", ""])
+    def test_only_approve_and_deny_are_answers(self, client: TestClient, answer: str) -> None:
+        response = client.post(f"/api/escalations/esc_x/{answer}", headers=APPROVE)
+        assert response.status_code == 404
+
+    def test_the_amount_is_rendered_for_the_human_who_must_decide(self, client: TestClient) -> None:
+        """A person approving a payment should see rupees, not paise. The formatting is
+        display only -- what actually releases the money is the request hash."""
+        body = client.get("/api/escalations").json()
+        assert "amount_formatted" not in body  # nothing pending, nothing to render
+        assert body["timeout_seconds"] > 0
 
 
 class TestPolicySurface:

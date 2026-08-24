@@ -36,7 +36,7 @@ from paynaka.audit import AuditChain
 from paynaka.clock import FrozenClock
 from paynaka.engine import PayNaka
 from paynaka.env import load_env
-from paynaka.identity import Caller, TokenRegistry, Unauthenticated
+from paynaka.identity import Caller, TokenRegistry, Unauthenticated, load_approvers
 from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
 from paynaka.mode import Mode, shadow_report
 from paynaka.money import format_inr
@@ -83,6 +83,9 @@ class Hub:
         # the simulated rail this mints a development credential; in front of a real rail
         # it refuses, and the service does not come up.
         self.callers = TokenRegistry.from_env()
+        # A separate set, and a token in both is a startup failure. A step-up the buying
+        # agent can approve on its own behalf is not an escalation.
+        self.approvers = load_approvers(self.callers)
         # Enforce unless the operator asked for otherwise, and fail to start on a typo.
         self.mode = Mode.from_env()
         self.state = SqliteState(":memory:", clock=self.clock)
@@ -176,6 +179,24 @@ def authenticated(request: Request) -> Caller:
             status_code=401,
             detail=str(exc),
             headers={"WWW-Authenticate": 'Bearer realm="paynaka"'},
+        ) from exc
+
+
+def approver(request: Request) -> Caller:
+    """Identify a human approver, or refuse.
+
+    A different credential set from the one agents use, checked the same way. With no
+    approvers configured the registry is empty and authenticates nobody, so every step-up
+    runs out its window and resolves to DENY -- which is the fail-closed direction and
+    exactly what "unanswered" is supposed to mean.
+    """
+    try:
+        return hub.approvers.authenticate(request.headers.get("authorization"))
+    except Unauthenticated as exc:
+        raise HTTPException(
+            status_code=401,
+            detail=str(exc),
+            headers={"WWW-Authenticate": 'Bearer realm="paynaka-approval"'},
         ) from exc
 
 
@@ -309,6 +330,61 @@ def shadow() -> dict[str, Any]:
             check: format_inr(amount) for check, amount in sorted(report.by_check_amount.items())
         },
     }
+
+
+@app.get("/api/escalations")
+def escalations() -> dict[str, Any]:
+    """What is waiting for a human, and what already ran out of time.
+
+    Expired escalations are listed separately rather than hidden. "Nobody answered in
+    time" is a number an operator should be able to see going up, and a dropped row cannot
+    be counted.
+    """
+    pending = hub.state.pending_escalations(clock=hub.clock)
+    expired = hub.state.expired_escalations(clock=hub.clock)
+    return {
+        "timeout_seconds": hub.policy.step_up_timeout_seconds,
+        "on_timeout": hub.policy.on_step_up_timeout,
+        "approvers_configured": len(hub.approvers),
+        "pending": [
+            {**item.to_dict(), "amount_formatted": format_inr(item.amount)} for item in pending
+        ],
+        "expired": [
+            {**item.to_dict(), "amount_formatted": format_inr(item.amount)} for item in expired
+        ],
+    }
+
+
+@app.post("/api/escalations/{escalation_id}/{answer}")
+def decide(escalation_id: str, answer: str, request: Request) -> dict[str, Any]:
+    """Approve or deny one escalation. Requires an *approver* credential.
+
+    Approving does not move money. It makes the money movable by the one request whose
+    hash is on this escalation, once, and only until the window closes. The agent's next
+    attempt at that exact request spends the approval; anything else does not.
+    """
+    if answer not in {"approve", "deny"}:
+        raise HTTPException(status_code=404, detail="answer must be 'approve' or 'deny'")
+
+    caller = approver(request)
+    escalation = hub.naka.decide_escalation(
+        escalation_id, approve=answer == "approve", by=caller.name
+    )
+    if escalation is None:
+        # Unknown, already decided, or the window closed -- deliberately not
+        # distinguished. A prober should not learn which escalation ids exist.
+        raise HTTPException(status_code=409, detail="that answer did not apply")
+
+    hub.emit(
+        "escalation.decided",
+        {
+            "escalation_id": escalation.id,
+            "outcome": escalation.state,
+            "decided_by": caller.name,
+            "amount": escalation.amount,
+        },
+    )
+    return {**escalation.to_dict(), "amount_formatted": format_inr(escalation.amount)}
 
 
 @app.get("/api/events")

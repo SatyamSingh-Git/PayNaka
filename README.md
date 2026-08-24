@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="1540 tests" src="https://img.shields.io/badge/tests-1540-2F6B4F?style=flat-square">
-  <img alt="1028 adversarial" src="https://img.shields.io/badge/adversarial-1028-2F6B4F?style=flat-square">
+  <img alt="1583 tests" src="https://img.shields.io/badge/tests-1583-2F6B4F?style=flat-square">
+  <img alt="1061 adversarial" src="https://img.shields.io/badge/adversarial-1061-2F6B4F?style=flat-square">
   <img alt="coverage 88%" src="https://img.shields.io/badge/coverage-88%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -299,6 +299,37 @@ mean pairwise similarity 0.110, p95 0.357, max 0.951
 106 pairs above 0.90 cosine  -  106 same-seed, 0 cross-seed
 ```
 
+## The human in the loop, and the bug that showed it never worked
+
+Above `step_up_above`, a person decides. `policy.yaml` has always said so. It had never
+worked, and building the approval flow is what found out why.
+
+`_resolve_idempotency` ran before `check_step_up` and *claimed* the idempotency key. A
+request that stepped up burned its key while waiting for a human — so the agent's retry
+after approval was classified as a duplicate and replayed a result that had never been
+produced. **The policy documented a flow that structurally could not finish.**
+
+```
+                       before                        now
+agent asks         STEP_UP, key claimed         STEP_UP, nothing claimed
+human approves     ---                          approval bound to this request's hash
+agent retries      "duplicate, replaying"       ALLOW, and the money moves
+                    nothing moves, ever
+```
+
+**Approving is a different credential.** A step-up the buying agent can answer on its own
+behalf is theatre, so `PAYNAKA_APPROVER_TOKENS` is a separate set from
+`PAYNAKA_AGENT_TOKENS` — and a name *or a token* in both is a startup failure, because the
+dangerous configuration is not two entries with the same label, it is one secret that
+opens two doors. Configure no approvers and nobody can approve anything: every step-up
+runs out its window to DENY, which is what "unanswered" is supposed to mean.
+
+An approval releases **exactly one request, exactly once, and only until the window
+closes**. It is bound to the request hash, so "yes to ₹3,500" is not "yes to ₹3,500-ish"
+and not the same ₹3,500 to a different address. The spend is one guarded `UPDATE`, so two
+concurrent retries cannot both use it. And the chain records *who* answered — "a human
+approved it" is not an audit trail; which human is.
+
 ## What the checkpoint costs
 
 A defence nobody will deploy is not a defence, and "we have not measured what it adds to
@@ -437,7 +468,7 @@ verifies is worse than none.
 
 ## Testing
 
-1,540 tests, of which **1,028 are adversarial**. 88% branch coverage on `paynaka/`,
+1,583 tests, of which **1,061 are adversarial**. 88% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?
@@ -465,6 +496,8 @@ Every defect below was found by this suite and is now pinned as a named regressi
 | property tests | one line item with `qty=-1` crashed the engine while writing the audit record **for its own denial** — a one-field denial of service |
 | property tests | checks were evaluated eagerly, so a later check that raised overrode an earlier clean denial |
 | circuit breaker | revoking a *subject* did nothing, because `check_revoked` only ever looked at the mandate id and the session — a revocation nothing checks is not a revocation |
+| the approval flow | the step-up claimed the idempotency key while waiting, so the retry after a human approved replayed a result that was never produced — a documented escalation that could not complete |
+| chaos suite | reordering step-up ahead of *all* of idempotency put a tampered redelivery into an approver's queue instead of refusing it by name |
 | adversarial | a non-ASCII byte in the `Authorization` header was an unhandled `TypeError` on the auth path — a 500 where a 401 belongs, reachable before any credential is known |
 
 ```bash

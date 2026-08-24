@@ -23,6 +23,7 @@ Those differ on partial capture, and trusting the request is how a ledger drifts
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,7 +49,7 @@ from paynaka.mandate import (
 from paynaka.mode import Mode
 from paynaka.policy import Policy
 from paynaka.rails.base import Rail, RailDeclined, RailError
-from paynaka.state import SqliteState
+from paynaka.state import Escalation, SqliteState
 
 __all__ = ["ExecutionResult", "PayNaka"]
 
@@ -168,6 +169,20 @@ class PayNaka:
                 "mode": self.mode.value,
             }
         )
+
+        if decision.verdict is Verdict.STEP_UP:
+            # Nobody has approved this yet, so put it somewhere a person can see it. The
+            # escalation is opened here rather than in the gate: asking a human is a
+            # workflow action, and `gate.py` stays a function that answers a question.
+            escalation = self._escalate(request, mandate, decision)
+            return ExecutionResult(
+                decision=decision,
+                executed=False,
+                audit_seq=record.seq,
+                audit_hash=record.hash,
+                provenance={**provenance, "escalation": escalation.to_dict()},
+                mode=self.mode,
+            )
 
         if decision.verdict is not Verdict.ALLOW:
             if self.mode.enforcing:
@@ -299,6 +314,94 @@ class PayNaka:
             mode=self.mode,
             suppressed=suppressed,
         )
+
+    def _escalate(
+        self, request: MoneyRequest, mandate: IntentMandate, decision: GateDecision
+    ) -> Escalation:
+        """Open -- or find -- the escalation for this request, and audit it.
+
+        Idempotent on the request hash, so a duplicate delivery of the same
+        above-threshold action does not put a second approval in somebody's queue. Two
+        rows for one request would let a person approve it twice, and the second approval
+        is authority nobody granted twice.
+
+        The summary is what a human will read. It is display data and nothing more: the
+        thing that actually releases the money is the request hash, so a person approving
+        from a mangled summary still cannot release anything but the request that was
+        hashed.
+        """
+        escalation = self.state.open_escalation(
+            escalation_id=f"esc_{secrets.token_urlsafe(18)}",
+            request_hash=request_hash(request),
+            mandate_id=mandate.mandate_id,
+            session_id=mandate.session_id,
+            subject=mandate.subject,
+            action=request.action,
+            amount=request.effective_amount,
+            summary={
+                "action": request.action,
+                "amount": request.effective_amount,
+                "currency": request.currency,
+                "destination": request.destination,
+                "items": [
+                    {"sku": item.sku, "qty": item.qty, "unit_paise": item.unit_paise}
+                    for item in request.items
+                ],
+                "reason": decision.reason,
+            },
+            timeout_seconds=self.policy.step_up_timeout_seconds,
+            clock=self.clock,
+        )
+        self._write(
+            {
+                "kind": "escalation.opened",
+                "escalation_id": escalation.id,
+                "request_id": request.request_id,
+                "request_hash": escalation.request_hash,
+                "action": escalation.action,
+                "amount": escalation.amount,
+                "expires_at": escalation.expires_at,
+                "detail": (
+                    f"{decision.check_id} sent this to a human; unanswered by "
+                    f"{escalation.expires_at} it is a DENY, which is not configurable"
+                ),
+            }
+        )
+        return escalation
+
+    def decide_escalation(self, escalation_id: str, *, approve: bool, by: str) -> Escalation | None:
+        """Record a human's answer, and audit who gave it.
+
+        Returns the updated escalation, or ``None`` if the answer did not apply -- unknown
+        id, already decided, or the window closed. Those are deliberately not
+        distinguished to the caller: the question is "did my answer land".
+
+        Approving does not move money. It makes the money movable by the *one* request
+        that was hashed into this escalation, once, and only until the window closes.
+        """
+        outcome = self.state.decide_escalation(
+            escalation_id, approve=approve, by=by, clock=self.clock
+        )
+        if outcome is None:
+            return None
+        escalation = self.state.escalation(escalation_id)
+        if escalation is None:  # pragma: no cover - decided implies present
+            return None
+        self._write(
+            {
+                "kind": "escalation.decided",
+                "escalation_id": escalation.id,
+                "request_hash": escalation.request_hash,
+                "outcome": outcome,
+                "decided_by": by,
+                "amount": escalation.amount,
+                "detail": (
+                    f"{by} said {outcome} to {escalation.action} for {escalation.amount} "
+                    f"paise; an approval releases exactly one request, once"
+                ),
+            }
+        )
+        return escalation
 
     def _account_for_denial(self, decision: GateDecision, mandate: IntentMandate) -> None:
         """Count a refusal, and withdraw the session's authority if it has had too many.

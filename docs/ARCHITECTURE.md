@@ -57,6 +57,7 @@ That is the difference between "we made it harder" and "the action is not availa
 | `paynaka/engine.py` | the only path to a rail | audits the decision *before* calling out |
 | `paynaka/identity.py` | who may ask | no unauthenticated path, not even in development |
 | `paynaka/mode.py` | enforce or observe | the mode is on every audit record, never inferred |
+| `paynaka/state.py` escalations | step-up approvals | single-use, bound to the request hash, expires to DENY |
 | `paynaka/proxy/mcp.py` | Razorpay-compatible MCP server | fails closed without a mandate |
 | `paynaka/rails/` | sim + Razorpay test mode | refuses any key that is not `rzp_test_` |
 

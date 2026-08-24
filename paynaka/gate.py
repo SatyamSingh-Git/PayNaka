@@ -34,7 +34,7 @@ from paynaka.clock import Clock
 from paynaka.mandate import IntentMandate, MandateExpired
 from paynaka.money import MAX_PAISE, MoneyError, add, mul_qty, to_paise
 from paynaka.policy import Policy
-from paynaka.state import SqliteState
+from paynaka.state import IdempotencyRecord, SqliteState
 
 __all__ = [
     "GateDecision",
@@ -631,15 +631,41 @@ def evaluate(
         if decision is not None:
             return finish(decision)
 
+    # Step-up is resolved *before* idempotency, and the ordering is load-bearing rather
+    # than aesthetic. `_resolve_idempotency` claims the key; a request that still needs a
+    # human has not been acted on, so claiming its key would make the retry-after-approval
+    # look like a duplicate and replay a result that was never produced. The escalation
+    # flow could not complete at all until this moved. It is the same reasoning that
+    # already stops a step-up from claiming a refund balance: a request waiting on a
+    # person holds nothing.
+    # Idempotency is settled in two halves, and the split is what makes the escalation
+    # flow possible. The read-only half runs *before* step-up so that every terminal
+    # answer is given before anybody asks a human: a redelivery whose amount was altered
+    # in flight is `idempotency.key_reuse`, not an approval request, and an honest
+    # duplicate of a completed payment replays instead of escalating a second time.
+    # Putting a tampered request into an approver's queue is worse than refusing it, even
+    # though the claim below would still catch it.
+    settled = _classify_idempotency(request, policy, state)
+    if settled is not None:
+        return finish(settled)
+
+    released_by: str | None = None
+    step_up = check_step_up(request, policy)
+    if step_up is not None:
+        # A human approved this exact request, or nobody has. The approval is spent here,
+        # so it cannot release a second request nor this one twice.
+        released_by = state.consume_approval(request_hash(request), clock=clock)
+        if released_by is None:
+            return finish(step_up)
+
+    # The authoritative claim, and the only half that writes. It happens after step-up
+    # because a request still waiting on a person has not been acted on, and claiming its
+    # key would make the retry-after-approval look like a duplicate and replay a result
+    # that was never produced. It re-derives the same answers as the read-only half, so a
+    # request that lost a race between the two is still classified correctly.
     idempotency = _resolve_idempotency(request, policy, state, clock)
     if idempotency is not None:
         return finish(idempotency)
-
-    step_up = check_step_up(request, policy)
-    if step_up is not None:
-        # No balance is claimed for a request that still needs a human. Holding it would
-        # block other refunds for as long as the approval sits in somebody's inbox.
-        return finish(step_up)
 
     reservation = _reserve_refund(request, state, clock)
     if reservation is not None:
@@ -654,6 +680,9 @@ def evaluate(
             evidence={
                 "amount": request.effective_amount,
                 "authorised": mandate.max_total,
+                # Present only when a person unlocked this. An ALLOW above the auto-approval
+                # band should never be readable without the approval that released it.
+                **({"released_by_escalation": released_by} if released_by else {}),
             },
         )
     )
@@ -698,6 +727,34 @@ def _reserve_refund(request: MoneyRequest, state: SqliteState, clock: Clock) -> 
     )
 
 
+def _classify_idempotency(
+    request: MoneyRequest, policy: Policy, state: SqliteState
+) -> GateDecision | None:
+    """The read-only half: every answer that does not need the key to be claimed.
+
+    Writes nothing, so it is safe to run before step-up. Its job is ordering rather than
+    enforcement -- :func:`_resolve_idempotency` still derives the same outcomes under a
+    real claim, and a request that slips between the two is caught there. What this buys
+    is that a terminal answer is given before a human is asked for one.
+    """
+    if not policy.require_idempotency_key:
+        return None
+
+    key = request.idempotency_key
+    if not key:
+        return _deny(
+            "idempotency.missing",
+            "a money action must carry an idempotency key",
+            action=request.action,
+        )
+
+    existing = state.lookup_idempotency(key)
+    if existing is None:
+        return None
+
+    return _decide_on_existing(request, key, existing)
+
+
 def _resolve_idempotency(
     request: MoneyRequest, policy: Policy, state: SqliteState, clock: Clock
 ) -> GateDecision | None:
@@ -718,6 +775,18 @@ def _resolve_idempotency(
     if existing is None:
         return None  # fresh key, claimed; proceed
 
+    return _decide_on_existing(request, key, existing)
+
+
+def _decide_on_existing(
+    request: MoneyRequest, key: str, existing: IdempotencyRecord
+) -> GateDecision:
+    """What a key we have already seen means for the request presenting it.
+
+    One function, called from both halves, so the read-only classification and the
+    authoritative claim cannot drift into disagreeing about the same pair of records.
+    """
+    fingerprint = request_hash(request)
     if existing.request_hash != fingerprint:
         # Same key, different body. Either a client bug or an attempt to have a
         # previously-approved key authorise a different payment.

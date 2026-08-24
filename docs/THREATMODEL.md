@@ -96,6 +96,57 @@ reasoning inside it. A compromised agent holding a valid credential is still a c
 agent with a valid credential — which is the whole reason the mandate exists downstream of
 this check rather than instead of it.
 
+### A step-up that could be answered by the thing being checked
+
+`policy.yaml` has always declared an escalation band -- above `step_up_above`, a person
+decides. Two things were wrong with that until now, and the second was worse than the
+first.
+
+**It could not complete.** `_resolve_idempotency` ran before `check_step_up` and *claimed*
+the idempotency key. So a request that stepped up burned its key while waiting, and the
+agent's retry after a human approved was classified as a duplicate and replayed a result
+that had never been produced. The policy documented a flow that structurally could not
+finish. Step-up is now resolved before the claim -- the same reasoning that already stopped
+a step-up from holding a refund balance: a request waiting on a person holds nothing.
+
+That reordering had to be done carefully, and the first attempt was wrong in a way the
+chaos suite caught. Moving step-up ahead of *all* of idempotency meant a redelivery whose
+amount was altered in flight came back as `policy.step_up` instead of
+`idempotency.key_reuse` -- so a tampered duplicate landed in an approver's queue instead of
+being refused outright. The money was still safe, because the claim below re-derives the
+answer, but putting a fraudulent request in front of a human is a worse outcome than
+refusing it. Idempotency is now settled in two halves: a read-only classification that runs
+*before* step-up so every terminal answer is given before anyone is asked for one, and the
+authoritative claim that runs after.
+
+**Approving is a different credential.** A step-up the buying agent can answer on its own
+behalf is theatre. `PAYNAKA_APPROVER_TOKENS` is a separate set from
+`PAYNAKA_AGENT_TOKENS`, and a name *or a token* appearing in both is a startup failure --
+the dangerous configuration is not two entries with the same label, it is one secret that
+opens two doors. With no approvers configured nobody can approve anything and every
+step-up runs out its window, which is the fail-closed direction.
+
+What an approval is, precisely:
+
+| Property | Mechanism |
+|---|---|
+| releases exactly one request | bound to `request_hash`, which covers the whole body -- "yes to Rs 3,500" is not "yes to Rs 3,500-ish", and not the same Rs 3,500 to a different address |
+| releases it once | `'approved' -> 'consumed'` is one guarded `UPDATE`, so two concurrent retries cannot both spend it |
+| stops being an approval when the window closes | checked at the answer *and* at the spend, so an approval that expires while sitting there approved is not an approval |
+| is attributable | the audit chain records who answered; "a human approved it" is not an audit trail, which human is |
+
+The first answer is the answer. Approve-then-deny does not retract an approval, and that
+is stated rather than implied: retraction would need its own mechanism, and pretending
+`deny` is one would be worse than not offering it.
+
+A duplicate delivery does not queue a second approval. Escalations are idempotent on the
+request hash, because two rows for one request would let a person approve it twice, and
+the second approval is authority nobody granted twice.
+
+Still not defended: an approver who approves things they should not. This mechanism bounds
+*what* an approval can release, never *whether the person was right to give it*. That is a
+judgment, and judgments are not what this project puts in the money path.
+
 ### Money-correctness failures with no attacker at all
 
 Duplicate webhooks, over-refunds accumulating across partials, retries past NPCI's cap,

@@ -45,6 +45,7 @@ __all__ = [
     "Caller",
     "TokenRegistry",
     "Unauthenticated",
+    "load_approvers",
     "parse_bearer",
 ]
 
@@ -60,6 +61,7 @@ MIN_TOKEN_LENGTH: Final[int] = 24
 DEV_TOKEN_PATH: Final[str] = "var/dev-agent-token"  # noqa: S105
 
 _ENV_VAR: Final[str] = "PAYNAKA_AGENT_TOKENS"
+_APPROVER_ENV_VAR: Final[str] = "PAYNAKA_APPROVER_TOKENS"
 
 
 def _to_bytes(value: str) -> bytes:
@@ -152,6 +154,15 @@ class TokenRegistry:
         """The configured caller names, sorted. Safe to log."""
         return tuple(sorted(self._entries))
 
+    def shares_a_token_with(self, other: TokenRegistry) -> set[str]:
+        """Caller names in ``other`` whose token is also live in this registry.
+
+        Compared as tokens rather than names, because the dangerous configuration is not
+        two entries with the same label -- it is one secret that opens two doors.
+        """
+        mine = set(self._encoded.values())
+        return {name for name, token in other._encoded.items() if token in mine}
+
     def authenticate(self, header: str | None) -> Caller:
         """Return the :class:`Caller` behind an ``Authorization`` header, or raise.
 
@@ -198,7 +209,7 @@ class TokenRegistry:
         return cls({"dev-agent": load_or_create_dev_token(dev_token_path or DEV_TOKEN_PATH)})
 
 
-def _parse_entries(raw: str) -> dict[str, str]:
+def _parse_entries(raw: str, *, var: str = _ENV_VAR) -> dict[str, str]:
     """Parse ``name:token,name:token``. Every malformed shape is a hard failure.
 
     Fail closed on the way in. A silently dropped entry is a caller who cannot
@@ -208,16 +219,16 @@ def _parse_entries(raw: str) -> dict[str, str]:
     for chunk in raw.split(","):
         item = chunk.strip()
         if not item:
-            raise ValueError(f"{_ENV_VAR} has an empty entry; check for a stray comma")
+            raise ValueError(f"{var} has an empty entry; check for a stray comma")
         name, separator, token = item.partition(":")
         if not separator:
             raise ValueError(
-                f"{_ENV_VAR} entry {item!r} is not 'name:token'. A bare token has no "
+                f"{var} entry {item!r} is not 'name:token'. A bare token has no "
                 f"caller name, so an audit record could not say who acted."
             )
         name = name.strip()
         if name in entries:
-            raise ValueError(f"{_ENV_VAR} names caller {name!r} twice")
+            raise ValueError(f"{var} names caller {name!r} twice")
         entries[name] = token
     return entries
 
@@ -244,3 +255,34 @@ def load_or_create_dev_token(path: str = DEV_TOKEN_PATH) -> str:
     with contextlib.suppress(OSError, NotImplementedError):
         os.chmod(token_path, 0o600)
     return token
+
+
+def load_approvers(agents: TokenRegistry) -> TokenRegistry:
+    """The credentials permitted to answer a step-up. A separate set, deliberately.
+
+    A step-up the buying agent can approve on its own behalf is theatre. The whole value
+    of escalating is that a *different* party decides, so approving is a different
+    credential rather than a flag on the same one -- and a token that appears in both sets
+    is a startup failure rather than a subtle privilege overlap nobody notices.
+
+    Configured the same way as agent tokens, in ``PAYNAKA_APPROVER_TOKENS``. Left unset,
+    the returned registry is empty, and an empty registry authenticates nobody: with no
+    approvers configured, every step-up runs out its window and resolves to DENY. That is
+    the fail-closed direction, and it is what "unanswered" is supposed to mean.
+    """
+    raw = os.environ.get(_APPROVER_ENV_VAR, "").strip()
+    approvers = TokenRegistry(_parse_entries(raw, var=_APPROVER_ENV_VAR) if raw else {})
+
+    shared = set(agents.names) & set(approvers.names)
+    if shared:
+        raise ValueError(
+            f"caller {sorted(shared)} is configured as both an agent and an approver. "
+            f"A step-up the agent can approve for itself is not an escalation."
+        )
+    overlap = agents.shares_a_token_with(approvers)
+    if overlap:
+        raise ValueError(
+            f"an agent credential and an approver credential are the same token "
+            f"({sorted(overlap)}); the agent could approve its own step-up."
+        )
+    return approvers
