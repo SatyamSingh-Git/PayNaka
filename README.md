@@ -20,6 +20,23 @@
 
 ---
 
+<p align="center">
+  <a href="#quickstart"><b>Run it</b></a> ·
+  <a href="#a-real-razorpay-payment-gated"><b>Real Razorpay evidence</b></a> ·
+  <a href="#the-four-defences-over-the-attacks-that-land"><b>The comparison</b></a> ·
+  <a href="docs/THREATMODEL.md"><b>What it does not defend</b></a>
+</p>
+
+> **In one line.** A buying agent holds no payment credentials; it can only *ask*. PayNaka
+> answers with deterministic code — `gate.py` imports no LLM SDK, and a test fails the build
+> if that changes.
+>
+> **What it does not claim.** Prompt injection is not solved. PayNaka does not stop an agent
+> being persuaded; it stops a persuaded agent moving money outside its mandate. Those are
+> different claims and only the second is made here.
+
+---
+
 ## The observation this is built on
 
 Razorpay's remote MCP server exposes about forty tools to any AI agent. Every read path is open.
@@ -72,6 +89,56 @@ poisoned catalog ──untrusted──▶ buyer agent ──ask──▶ ┏━�
                                                            ▼
                                                    hash-chained audit
 ```
+
+## Quickstart
+
+```bash
+uv sync --all-extras
+make check                    # lint · types · tests · secret scan
+```
+
+**One command, the whole argument, about ninety seconds:**
+
+```bash
+make demo
+```
+
+It runs the story in the order of the argument rather than the order things were built: the
+attack a smarter agent cannot avoid, then the attack with nobody attacking, then the
+injection everybody expects — reported with the measurement that says a real model mostly
+is not fooled by it. Then what the checkpoint costs.
+
+Or, with Docker and nothing else installed:
+
+```bash
+docker build -t paynaka . && docker run --rm paynaka
+```
+
+**These need no keys, no network, and no model.** Every number in this README came out of
+them, except the Razorpay ones below — those came from the real API:
+
+```bash
+make modelfree                # the four defences over the attacks that land → RESULTS.md
+make toctou                   # the price changes between reading it and paying it
+make chaos                    # six ways a gateway loses money with nobody attacking
+make sentinel                 # the detector, with its false-positive rate and margin
+make latency                  # what the checkpoint costs, decomposed by layer
+make audit-verify             # one intact chain, one with a denial rewritten as an approval
+make demo-attack              # poisoned catalog, checkpoint off then on
+```
+
+These reach the network:
+
+```bash
+cp .env.example .env          # Razorpay TEST keys + a model key
+make razorpay-lifecycle       # a REAL test-mode order, through the gate → var/evidence/
+make toctou-probe             # cents: do real agents notice the price changed?
+make bench                    # the injection corpus against four defences (needs a model key)
+```
+
+Works fully offline: `PAYNAKA_RAIL=sim` runs a deterministic in-process payment simulator, so the
+test suite and every demonstration above need no credentials. Set `PAYNAKA_RAIL=test` to drive the
+real Razorpay test-mode API.
 
 ## Drop-in adoption
 
@@ -729,53 +796,6 @@ Every figure is derived from the audit records on scrape, never accumulated in a
 beside the decision. A counter is faster and is a second source of truth that can disagree
 with the chain; when they disagree the counter is wrong, so it should not exist.
 
-## Quickstart
-
-```bash
-uv sync --all-extras
-make check                    # lint · types · tests · secret scan
-```
-
-**One command, the whole argument, about ninety seconds:**
-
-```bash
-make demo
-```
-
-It runs the story in the order of the argument rather than the order things were built: the
-attack a smarter agent cannot avoid, then the attack with nobody attacking, then the
-injection everybody expects — reported with the measurement that says a real model mostly
-is not fooled by it. Then what the checkpoint costs.
-
-Or, with Docker and nothing else installed:
-
-```bash
-docker build -t paynaka . && docker run --rm paynaka
-```
-
-**These need no keys, no network, and no model either.** Every number in this README came
-out of them:
-
-```bash
-make toctou                   # the price changes between reading it and paying it
-make chaos                    # six ways a gateway loses money with nobody attacking
-make sentinel                 # the detector, with its false-positive rate and margin
-make latency                  # what the checkpoint costs, decomposed by layer
-make demo-attack              # poisoned catalog, checkpoint off then on
-```
-
-These need a key, and cost money:
-
-```bash
-cp .env.example .env          # Razorpay TEST keys + a model key
-make toctou-probe             # cents: do real agents notice the price changed?
-make bench                    # four defences over the corpus → RESULTS.md
-```
-
-Works fully offline: `PAYNAKA_RAIL=sim` runs a deterministic in-process payment simulator, so the
-test suite and every demonstration above need no credentials. Set `PAYNAKA_RAIL=test` to drive the
-real Razorpay test-mode API.
-
 ## Safety and scope
 
 - **Test mode only.** PayNaka refuses to start against a Razorpay live key, and that refusal is
@@ -792,9 +812,20 @@ real Razorpay test-mode API.
 | -------- | -------- |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | trust boundary, components, the decision pipeline, why the credential split is the whole idea |
 | [THREATMODEL.md](docs/THREATMODEL.md) | what is defended, what is not, and the design refusals |
+| [SECURITY.md](docs/SECURITY.md) | reporting, credential handling, the trust boundary, how to reproduce every security claim |
+| [REGULATORY_BASIS.md](docs/REGULATORY_BASIS.md) | why the RBI/NPCI values are **configurable examples, unverified**, and what each needs before it governs real money |
+| [MCP_COMPATIBILITY.md](docs/MCP_COMPATIBILITY.md) | the five tools proxied, the divergences from Razorpay's 35+, and the honest positioning |
 | [HAAT.md](docs/HAAT.md) | corpus design, held-out families, evidence discipline, cost |
 | [DIVERSITY.md](docs/DIVERSITY.md) | generated corpus-diversity report |
-| RESULTS.md | generated by `make bench`. Absent here, and the benchmark section above says why |
+
+**Evidence, committed rather than described:**
+
+| Artifact | What it is |
+| -------- | -------- |
+| [RESULTS.md](RESULTS.md) · [RESULTS.json](RESULTS.json) | the four-defence comparison, generated by `make modelfree` |
+| [haat/out/modelfree.jsonl](haat/out/modelfree.jsonl) | every row behind that table, one JSON object each |
+| [var/evidence/](var/evidence/) | raw Razorpay test-mode responses: the order, the capture, the refund, and the two refusals that never reached the API |
+| `var/fixtures/audit-intact.db` · `audit-tampered.db` | one chain that verifies and one with a denial rewritten as an approval. `make audit-verify` runs both |
 
 ## The console
 

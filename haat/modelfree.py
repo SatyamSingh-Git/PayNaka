@@ -269,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     results = write_results(
         rows,
         corpus="model-independent",
+        generator="python -m haat.modelfree",
         path=args.results,
         note=(
             "Defences here have different applicability, so the aggregate row below has "
