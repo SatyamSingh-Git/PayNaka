@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 import {
   Alert,
   AlertTriangleIcon,
@@ -11,16 +11,19 @@ import {
   Code,
   Divider,
   EmptyState,
-  Heading,
   HistoryIcon,
   Text,
-} from '@razorpay/blade/components';
-import { api, formatInr, type AuditRecord } from '../api';
+} from "@razorpay/blade/components";
+import { PageHeader } from "../ui";
+import { api, formatInr, type AuditRecord } from "../api";
 
 export function Replay(): JSX.Element {
   const [records, setRecords] = React.useState<AuditRecord[]>([]);
-  const [head, setHead] = React.useState('');
-  const [verified, setVerified] = React.useState<{ intact: boolean; records: number } | null>(null);
+  const [head, setHead] = React.useState("");
+  const [verified, setVerified] = React.useState<{
+    intact: boolean;
+    records: number;
+  } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(() => {
@@ -46,12 +49,12 @@ export function Replay(): JSX.Element {
         flexWrap="wrap"
         gap="spacing.4"
       >
-        <Box>
-          <Heading size="large">Audit chain</Heading>
-          <Text color="surface.text.gray.subtle" marginTop="spacing.2">
-            Append-only and hash-linked. Every decision, allowed or refused.
-          </Text>
-        </Box>
+        <PageHeader
+          eyebrow="Audit"
+          title="Every decision, in order."
+          trailing="Editing one is detectable."
+          lede="Append-only and hash-linked. Each record carries the hash of the one before it, so history cannot be rewritten without the chain saying which record changed."
+        />
         <Box display="flex" gap="spacing.3">
           <Button variant="secondary" onClick={load}>
             Refresh
@@ -59,7 +62,10 @@ export function Replay(): JSX.Element {
           <Button
             icon={CheckCircleIcon}
             onClick={() => {
-              api.verifyAudit().then(setVerified).catch((exc) => setError(String(exc)));
+              api
+                .verifyAudit()
+                .then(setVerified)
+                .catch((exc) => setError(String(exc)));
             }}
           >
             Verify chain
@@ -78,17 +84,17 @@ export function Replay(): JSX.Element {
 
       {verified && (
         <Alert
-          color={verified.intact ? 'positive' : 'negative'}
+          color={verified.intact ? "positive" : "negative"}
           icon={verified.intact ? CheckCircleIcon : AlertTriangleIcon}
           title={
             verified.intact
               ? `Chain intact across ${verified.records} records`
-              : 'Chain broken'
+              : "Chain broken"
           }
           description={
             verified.intact
-              ? 'Every record was rehashed against its predecessor. Editing or removing one would break every hash after it, and verification would name the exact record.'
-              : 'A record has been edited or removed. The API response carries the sequence number and the kind of break.'
+              ? "Every record was rehashed against its predecessor. Editing or removing one would break every hash after it, and verification would name the exact record."
+              : "A record has been edited or removed. The API response carries the sequence number and the kind of break."
           }
           isDismissible={false}
         />
@@ -101,10 +107,14 @@ export function Replay(): JSX.Element {
               Head
             </Text>
             <Code size="small">{head}</Code>
-            <Text size="xsmall" color="surface.text.gray.muted" marginTop="spacing.2">
-              Publish this somewhere outside our control. The chain proves internal
-              consistency, not authenticity — only an external copy of the head catches a
-              wholesale rewrite.
+            <Text
+              size="xsmall"
+              color="surface.text.gray.muted"
+              marginTop="spacing.2"
+            >
+              Publish this somewhere outside our control. The chain proves
+              internal consistency, not authenticity — only an external copy of
+              the head catches a wholesale rewrite.
             </Text>
           </CardBody>
         </Card>
@@ -131,23 +141,36 @@ export function Replay(): JSX.Element {
 function Record({ record }: { record: AuditRecord }): JSX.Element {
   const payload = record.payload;
   const decision = payload.decision;
-  const denied = decision?.verdict === 'DENY';
-  const reads: Array<{ sku: string; review_count: number; untrusted_fields: string[] }> =
-    payload.provenance?.reads ?? [];
+  const denied = decision?.verdict === "DENY";
+  const reads: Array<{
+    sku: string;
+    review_count: number;
+    untrusted_fields: string[];
+  }> = payload.provenance?.reads ?? [];
 
   return (
     <Card padding="spacing.5">
       <CardBody>
         <Box display="flex" flexDirection="column" gap="spacing.3">
-          <Box display="flex" gap="spacing.3" alignItems="center" flexWrap="wrap">
+          <Box
+            display="flex"
+            gap="spacing.3"
+            alignItems="center"
+            flexWrap="wrap"
+          >
             <Badge emphasis="subtle">{`#${record.seq}`}</Badge>
             <Code size="small">{payload.kind}</Code>
             {decision && (
-              <Badge color={denied ? 'negative' : 'positive'} emphasis="intense">
+              <Badge
+                color={denied ? "negative" : "positive"}
+                emphasis="intense"
+              >
                 {decision.verdict}
               </Badge>
             )}
-            {decision?.check_id && <Code size="small">{decision.check_id}</Code>}
+            {decision?.check_id && (
+              <Code size="small">{decision.check_id}</Code>
+            )}
           </Box>
 
           {decision?.reason && <Text size="small">{decision.reason}</Text>}
@@ -187,7 +210,7 @@ function Record({ record }: { record: AuditRecord }): JSX.Element {
                     </Text>
                     {read.untrusted_fields?.length > 0 && (
                       <Badge color="notice" emphasis="subtle">
-                        {`untrusted: ${read.untrusted_fields.join(', ')}`}
+                        {`untrusted: ${read.untrusted_fields.join(", ")}`}
                       </Badge>
                     )}
                   </Box>

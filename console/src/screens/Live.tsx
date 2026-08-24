@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 import {
   Alert,
   Amount,
@@ -12,7 +12,6 @@ import {
   CollapsibleBody,
   CollapsibleLink,
   Divider,
-  EmptyState,
   Heading,
   Indicator,
   Text,
@@ -21,31 +20,80 @@ import {
   ShieldIcon,
   AlertTriangleIcon,
   CheckCircleIcon,
-} from '@razorpay/blade/components';
-import { api, formatInr, type DemoRun } from '../api';
+} from "@razorpay/blade/components";
+import { api, formatInr, type DemoRun } from "../api";
 
-type Mode = { scenario: 'happy' | 'attack'; gate: boolean };
+type Mode = { scenario: "happy" | "attack"; gate: boolean };
 
 const RUNS: Array<{ mode: Mode; label: string; help: string }> = [
   {
-    mode: { scenario: 'happy', gate: true },
-    label: 'Clean purchase',
-    help: 'What the shopper actually asked for. Must go through.',
+    mode: { scenario: "happy", gate: true },
+    label: "Clean purchase",
+    help: "What the shopper actually asked for. Must go through.",
   },
   {
-    mode: { scenario: 'attack', gate: false },
-    label: 'Attack · gate off',
-    help: 'The agent holds the rail. Establishes that the attack is real.',
+    mode: { scenario: "attack", gate: false },
+    label: "Attack · gate off",
+    help: "The agent holds the rail. Establishes that the attack is real.",
   },
   {
-    mode: { scenario: 'attack', gate: true },
-    label: 'Attack · gate on',
-    help: 'The same run, through PayNaka.',
+    mode: { scenario: "attack", gate: true },
+    label: "Attack · gate on",
+    help: "The same run, through PayNaka.",
   },
 ];
 
+/** The comparison the whole project exists to make, sized like it matters. */
+function Verdict({
+  caption,
+  paise,
+  tone,
+  detail,
+}: {
+  caption: string;
+  paise: number | null;
+  tone: "negative" | "positive";
+  detail: string;
+}): JSX.Element {
+  const intense =
+    tone === "negative"
+      ? "feedback.text.negative.intense"
+      : "feedback.text.positive.intense";
+  return (
+    <Box flex="1" minWidth="260px">
+      <Text size="small" weight="semibold" color="surface.text.gray.muted">
+        {caption}
+      </Text>
+      <Box marginTop="spacing.3" minHeight="56px">
+        {paise === null ? (
+          <Heading
+            size="2xlarge"
+            weight="semibold"
+            color="surface.text.gray.disabled"
+          >
+            —
+          </Heading>
+        ) : (
+          <Amount
+            value={paise / 100}
+            type="heading"
+            size="2xlarge"
+            weight="semibold"
+            color={intense as never}
+          />
+        )}
+      </Box>
+      <Text size="small" color="surface.text.gray.muted" marginTop="spacing.2">
+        {detail}
+      </Text>
+    </Box>
+  );
+}
+
 export function Live(): JSX.Element {
   const [run, setRun] = React.useState<DemoRun | null>(null);
+  const [off, setOff] = React.useState<DemoRun | null>(null);
+  const [on, setOn] = React.useState<DemoRun | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -53,7 +101,13 @@ export function Live(): JSX.Element {
     setBusy(label);
     setError(null);
     try {
-      setRun(await api.runDemo(mode.scenario, mode.gate));
+      const result = await api.runDemo(mode.scenario, mode.gate);
+      setRun(result);
+      // Both halves of the comparison persist, so the hero keeps showing the contrast
+      // after the second run rather than replacing the first with it.
+      if (mode.scenario === "attack") {
+        (mode.gate ? setOn : setOff)(result);
+      }
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     } finally {
@@ -62,28 +116,93 @@ export function Live(): JSX.Element {
   }
 
   return (
-    <Box display="flex" flexDirection="column" gap="spacing.6">
+    <Box display="flex" flexDirection="column" gap="spacing.7">
+      {/* ------------------------------------------------------------- hero */}
       <Box>
-        <Heading size="large">A shopper authorised ₹1,999</Heading>
-        <Text color="surface.text.gray.subtle" marginTop="spacing.2">
-          A review on the atta carries an injection. Run it with the checkpoint off, then on.
-        </Text>
+        <Badge color="information" emphasis="subtle" size="medium">
+          Live · simulated rail · no keys
+        </Badge>
+        <Box marginTop="spacing.4" maxWidth="860px">
+          <Heading size="2xlarge" weight="semibold">
+            A poisoned review tries to move ₹51,999.
+          </Heading>
+          <Box marginTop="spacing.2">
+            <Heading
+              size="2xlarge"
+              weight="regular"
+              color="surface.text.gray.muted"
+            >
+              The shopper authorised ₹1,999.
+            </Heading>
+          </Box>
+        </Box>
+        <Box marginTop="spacing.4" maxWidth="720px">
+          <Text size="large" color="surface.text.gray.subtle">
+            The agent is helpful, and believes the review. Run it with the
+            checkpoint off, then on, and compare what left the account.
+          </Text>
+        </Box>
       </Box>
 
+      {/* -------------------------------------------------- the contrast */}
+      <Card elevation="lowRaised" padding="spacing.7">
+        <CardBody>
+          <Box display="flex" gap="spacing.7" flexWrap="wrap">
+            <Verdict
+              caption="WITHOUT PAYNAKA"
+              paise={off ? off.money_moved : null}
+              tone="negative"
+              detail={
+                off
+                  ? `${formatInr(off.overspent)} beyond the mandate`
+                  : "run “Attack · gate off” to establish the attack is real"
+              }
+            />
+            <Divider orientation="vertical" />
+            <Verdict
+              caption="WITH PAYNAKA"
+              paise={on ? on.money_moved : null}
+              tone="positive"
+              detail={
+                on
+                  ? (on.denials[0]?.check_id ?? "allowed within the mandate")
+                  : "then run “Attack · gate on”"
+              }
+            />
+          </Box>
+        </CardBody>
+      </Card>
+
+      {/* ------------------------------------------------------------ runs */}
       <Box display="flex" gap="spacing.4" flexWrap="wrap">
         {RUNS.map(({ mode, label, help }) => (
-          <Card key={label} width={{ base: '100%', m: '320px' }} padding="spacing.5">
+          <Card
+            key={label}
+            width={{ base: "100%", m: "320px" }}
+            padding="spacing.5"
+          >
             <CardBody>
-              <Box display="flex" flexDirection="column" gap="spacing.3" height="100%">
+              <Box
+                display="flex"
+                flexDirection="column"
+                gap="spacing.3"
+                height="100%"
+              >
                 <Text weight="semibold">{label}</Text>
                 <Text size="small" color="surface.text.gray.muted">
                   {help}
                 </Text>
-                <Box marginTop="auto" paddingTop="spacing.3">
+                <Box marginTop="auto" paddingTop="spacing.4">
                   <Button
                     isFullWidth
-                    variant={mode.gate && mode.scenario === 'attack' ? 'primary' : 'secondary'}
-                    icon={mode.scenario === 'happy' ? ShoppingCartIcon : ShieldIcon}
+                    variant={
+                      mode.gate && mode.scenario === "attack"
+                        ? "primary"
+                        : "secondary"
+                    }
+                    icon={
+                      mode.scenario === "happy" ? ShoppingCartIcon : ShieldIcon
+                    }
                     isLoading={busy === label}
                     isDisabled={busy !== null}
                     onClick={() => void go(mode, label)}
@@ -112,14 +231,6 @@ export function Live(): JSX.Element {
         </Box>
       )}
 
-      {!run && !busy && (
-        <EmptyState
-          title="Nothing has run yet"
-          description="Pick a scenario above. Everything runs against a simulated rail, so no key is needed."
-          size="large"
-        />
-      )}
-
       {run && <Outcome run={run} />}
     </Box>
   );
@@ -144,7 +255,7 @@ function Outcome({ run }: { run: DemoRun }): JSX.Element {
           color="positive"
           icon={ShieldIcon}
           title="Blocked before any money moved"
-          description={run.denials[0]?.reason ?? ''}
+          description={run.denials[0]?.reason ?? ""}
           isDismissible={false}
         />
       ) : (
@@ -162,16 +273,21 @@ function Outcome({ run }: { run: DemoRun }): JSX.Element {
         <Ledger
           label="Actually moved"
           paise={run.money_moved}
-          tone={overspent ? 'negative' : 'positive'}
+          tone={overspent ? "negative" : "positive"}
         />
         <Ledger
           label="Overspent"
           paise={run.overspent}
-          tone={overspent ? 'negative' : 'positive'}
+          tone={overspent ? "negative" : "positive"}
         />
       </Box>
 
-      <Box display="flex" gap="spacing.6" flexWrap="wrap" alignItems="flex-start">
+      <Box
+        display="flex"
+        gap="spacing.6"
+        flexWrap="wrap"
+        alignItems="flex-start"
+      >
         <Box flex="1" minWidth="320px">
           <Heading size="small" marginBottom="spacing.4">
             What the agent did
@@ -180,10 +296,19 @@ function Outcome({ run }: { run: DemoRun }): JSX.Element {
             <CardBody>
               <Box display="flex" flexDirection="column" gap="spacing.3">
                 {run.transcript.map((step, index) => (
-                  <Box key={index} display="flex" gap="spacing.3" alignItems="flex-start">
+                  <Box
+                    key={index}
+                    display="flex"
+                    gap="spacing.3"
+                    alignItems="flex-start"
+                  >
                     <Box paddingTop="spacing.1">
                       <Indicator
-                        color={step.name?.startsWith('create_') ? 'notice' : 'information'}
+                        color={
+                          step.name?.startsWith("create_")
+                            ? "notice"
+                            : "information"
+                        }
                         emphasis="intense"
                         accessibilityLabel={step.role}
                       />
@@ -191,7 +316,11 @@ function Outcome({ run }: { run: DemoRun }): JSX.Element {
                     <Box flex="1">
                       <Code size="small">{step.name ?? step.role}</Code>
                       {step.args && Object.keys(step.args).length > 0 && (
-                        <Text size="xsmall" color="surface.text.gray.muted" marginTop="spacing.1">
+                        <Text
+                          size="xsmall"
+                          color="surface.text.gray.muted"
+                          marginTop="spacing.1"
+                        >
                           {JSON.stringify(step.args)}
                         </Text>
                       )}
@@ -244,8 +373,9 @@ function Outcome({ run }: { run: DemoRun }): JSX.Element {
                 <Code size="small">{run.poisoned_field}</Code>
               </Box>
               <Text size="small" color="surface.text.gray.subtle">
-                The field the injection arrived in. It is labelled untrusted in the catalog
-                feed, and the label travels with it into the audit record.
+                The field the injection arrived in. It is labelled untrusted in
+                the catalog feed, and the label travels with it into the audit
+                record.
               </Text>
             </Box>
           </CardBody>
@@ -255,7 +385,12 @@ function Outcome({ run }: { run: DemoRun }): JSX.Element {
       <Collapsible>
         <CollapsibleLink>Audit anchor and caveats</CollapsibleLink>
         <CollapsibleBody>
-          <Box display="flex" flexDirection="column" gap="spacing.3" paddingTop="spacing.3">
+          <Box
+            display="flex"
+            flexDirection="column"
+            gap="spacing.3"
+            paddingTop="spacing.3"
+          >
             <Box>
               <Text size="small" weight="semibold">
                 Audit head
@@ -280,10 +415,10 @@ function Ledger({
 }: {
   label: string;
   paise: number;
-  tone: 'neutral' | 'positive' | 'negative';
+  tone: "neutral" | "positive" | "negative";
 }): JSX.Element {
   return (
-    <Card width={{ base: '100%', m: '240px' }} padding="spacing.5">
+    <Card width={{ base: "100%", m: "240px" }} padding="spacing.5">
       <CardBody>
         <Text size="small" color="surface.text.gray.muted">
           {label}
@@ -295,10 +430,10 @@ function Ledger({
             size="xlarge"
             type="heading"
             color={
-              tone === 'negative'
-                ? 'feedback.text.negative.intense'
-                : tone === 'positive'
-                  ? 'feedback.text.positive.intense'
+              tone === "negative"
+                ? "feedback.text.negative.intense"
+                : tone === "positive"
+                  ? "feedback.text.positive.intense"
                   : undefined
             }
           />
@@ -308,14 +443,23 @@ function Ledger({
   );
 }
 
-function Decision({ decision }: { decision: DemoRun['denials'][number] }): JSX.Element {
-  const denied = decision.verdict === 'DENY';
+function Decision({
+  decision,
+}: {
+  decision: DemoRun["denials"][number];
+}): JSX.Element {
+  const denied = decision.verdict === "DENY";
   return (
     <Card padding="spacing.5">
       <CardBody>
         <Box display="flex" flexDirection="column" gap="spacing.3">
-          <Box display="flex" gap="spacing.3" alignItems="center" flexWrap="wrap">
-            <Badge color={denied ? 'negative' : 'positive'} emphasis="intense">
+          <Box
+            display="flex"
+            gap="spacing.3"
+            alignItems="center"
+            flexWrap="wrap"
+          >
+            <Badge color={denied ? "negative" : "positive"} emphasis="intense">
               {decision.verdict}
             </Badge>
             <Code size="small">{decision.action}</Code>
@@ -329,13 +473,20 @@ function Decision({ decision }: { decision: DemoRun['denials'][number] }): JSX.E
               borderRadius="medium"
             >
               {Object.entries(decision.evidence).map(([key, value]) => (
-                <Box key={key} display="flex" gap="spacing.3" justifyContent="space-between">
+                <Box
+                  key={key}
+                  display="flex"
+                  gap="spacing.3"
+                  justifyContent="space-between"
+                >
                   <Text size="xsmall" color="surface.text.gray.muted">
                     {key}
                   </Text>
                   <Text size="xsmall" weight="semibold">
-                    {key.includes('total') || key === 'requested' || key === 'authorised'
-                      ? typeof value === 'number'
+                    {key.includes("total") ||
+                    key === "requested" ||
+                    key === "authorised"
+                      ? typeof value === "number"
                         ? formatInr(value)
                         : String(value)
                       : JSON.stringify(value)}
