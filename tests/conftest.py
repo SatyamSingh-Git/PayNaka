@@ -149,3 +149,31 @@ def poisoned_order() -> MoneyRequest:
         ),
         destination=HOME,
     )
+
+
+@pytest.fixture(autouse=True)
+def _ephemeral_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """No test inherits a developer's durable configuration.
+
+    `.env` sets PAYNAKA_AUDIT_DB, and the moment the app started honouring it the suite
+    began writing into the committed audit fixture -- a 3-record chain of evidence became
+    31 records of test traffic. Nothing failed loudly; the fixture was simply no longer
+    what it claimed to be.
+
+    So the runtime is pinned ephemeral here. A test that wants durability sets these
+    itself, on a tmp_path, and says so.
+
+    Pinned to `:memory:` rather than deleted: `load_env()` re-reads `.env` at app startup
+    and puts back anything that is merely absent, so deleting them looks like it works and
+    does not.
+    """
+    monkeypatch.setenv("PAYNAKA_STATE_DB", ":memory:")
+    monkeypatch.setenv("PAYNAKA_AUDIT_DB", ":memory:")
+    monkeypatch.delenv("PAYNAKA_DEMO_CLOCK", raising=False)
+    # A signing key has no `:memory:`, so it gets a throwaway path instead. Left alone, a
+    # test run signs with -- and creates -- the developer's real `var/mandate_ed25519.key`.
+    monkeypatch.setenv(
+        "PAYNAKA_SIGNING_KEY_PATH", str(tmp_path_factory.mktemp("keys") / "signing.key")
+    )

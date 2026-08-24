@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2096 tests" src="https://img.shields.io/badge/tests-2096-2F6B4F?style=flat-square">
+  <img alt="2106 tests" src="https://img.shields.io/badge/tests-2106-2F6B4F?style=flat-square">
   <img alt="1338 adversarial" src="https://img.shields.io/badge/adversarial-1338-2F6B4F?style=flat-square">
   <img alt="coverage 92%" src="https://img.shields.io/badge/coverage-92%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
@@ -601,6 +601,36 @@ regulation as executable policy:
 | contact 08:00–19:00 | out-of-hours collection contact | RBI |
 | AFA above ₹15,000 | skipped additional-factor auth | RBI |
 
+## Does it remember anything?
+
+By default, no — and that was true while `.env.example` documented `PAYNAKA_AUDIT_DB` and
+`PAYNAKA_SIGNING_KEY_PATH` and the app read neither. A frozen clock, two in-memory
+databases, and a signing key generated fresh every boot: a restart erased idempotency,
+mandate spend, escalations, the audit chain, and the identity that had signed everything in
+it. A documented setting the code ignores is worse than an undocumented one, because
+somebody sets it and believes it worked.
+
+Those settings are read now. Point them at real paths and the promises hold across a
+restart:
+
+```bash
+PAYNAKA_STATE_DB=var/state.db
+PAYNAKA_AUDIT_DB=var/audit.db
+PAYNAKA_SIGNING_KEY_PATH=var/mandate_ed25519.key
+```
+
+`GET /api/health` reports `durable`, `clock` and `signing_key`, so an operator never has to
+guess which runtime they are on. Ten tests assert the property that matters — not "a file
+exists" but **a promise made before the restart is still binding after it**: the same
+idempotency key still refuses and still hands back the original `order_id`, the same mandate
+is still exhausted, a revocation still holds, and the chain verifies to the same head and
+then continues from it.
+
+**This is not production readiness and the project does not claim it.** Durable storage is
+one item on a list that also includes migrations, backup and recovery, key rotation,
+authenticated operator surfaces and an external audit anchor. What changed is that the
+demo's limits are now a configuration choice rather than a hard ceiling.
+
 ## Running more than one of these
 
 "It uses SQLite, so it is single-node" is the easy thing to say, and it is not what the code
@@ -744,7 +774,7 @@ verifies is worse than none.
 
 ## Testing
 
-2,096 tests, of which **1,338 are adversarial**. 92% branch coverage on `paynaka/`,
+2,106 tests, of which **1,338 are adversarial**. 92% branch coverage on `paynaka/`,
 `mypy --strict` clean. Every module ships both:
 
 - **forward tests** — does it do the right thing?

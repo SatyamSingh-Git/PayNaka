@@ -64,8 +64,8 @@ console/.env.local
 # The audit fixtures ARE committed. `make audit-verify` on a fresh clone had nothing to
 # verify, which made the hash chain an unfalsifiable claim: a verifier nobody has seen
 # catch anything. One intact chain, one with a denial rewritten as an approval.
-!var/audit.db
-!var/audit-tampered.db
+!var/fixtures/
+!var/fixtures/*.db
 
 # External review write-ups. Notes *about* the project, not output *of* it -- they are
 # somebody's assessment, and committing them would put a third party's words in the

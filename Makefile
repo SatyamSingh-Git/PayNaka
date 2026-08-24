@@ -141,9 +141,9 @@ sentinel-sealed: ## score the detector on held-out families. refuses before the 
 .PHONY: audit-verify
 audit-verify: ## recompute the committed chains: one intact, one tampered
 	@echo "-- intact --"
-	@$(PY) python -m paynaka.audit --db var/audit.db --verify
+	@$(PY) python -m paynaka.audit --db var/fixtures/audit-intact.db --verify
 	@echo "-- tampered (a denial rewritten as an approval) --"
-	@$(PY) python -m paynaka.audit --db var/audit-tampered.db --verify || true
+	@$(PY) python -m paynaka.audit --db var/fixtures/audit-tampered.db --verify || true
 
 .PHONY: seed-audit
 seed-audit: ## regenerate the committed audit fixtures

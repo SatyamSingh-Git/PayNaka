@@ -34,13 +34,18 @@ from buyer.tools import ToolBox
 from merchant.app import reset_catalog
 from merchant.catalog import CATALOG, Review
 from paynaka.audit import AuditChain
-from paynaka.clock import FrozenClock
+from paynaka.clock import FrozenClock, SystemClock
 from paynaka.engine import PayNaka
 from paynaka.env import load_env
 from paynaka.grants import Grants
 from paynaka.identity import Caller, TokenRegistry, Unauthenticated, load_approvers
 from paynaka.issuer import Issuer, IssuerError, ShopperIntent
-from paynaka.mandate import IntentMandate, MandateSigner, generate_keypair
+from paynaka.mandate import (
+    IntentMandate,
+    MandateSigner,
+    generate_keypair,
+    load_or_create_signing_key,
+)
 from paynaka.metrics import collect, render_prometheus
 from paynaka.mode import Mode, shadow_report
 from paynaka.money import format_inr
@@ -58,6 +63,12 @@ from paynaka.webhooks import (
 )
 
 __all__ = ["app"]
+
+#: Names the environment reads. Documented in `.env.example`, and now actually used.
+STATE_DB_ENV = "PAYNAKA_STATE_DB"
+AUDIT_DB_ENV = "PAYNAKA_AUDIT_DB"
+SIGNING_KEY_ENV = "PAYNAKA_SIGNING_KEY_PATH"
+DEMO_CLOCK_ENV = "PAYNAKA_DEMO_CLOCK"
 
 DEMO_CLOCK = "2026-08-23 15:00"
 AUTHORISED = 199_900
@@ -88,8 +99,36 @@ class Hub:
         more than once in one interpreter. Without that, `uvicorn --reload` would come
         back up holding a closed database, and so would the second test in any file.
         """
-        self.clock = FrozenClock.at_ist(DEMO_CLOCK)
-        self.signer = MandateSigner(generate_keypair()[0])
+        # Durable or ephemeral, decided by configuration rather than baked in.
+        #
+        # `.env.example` documented PAYNAKA_AUDIT_DB and PAYNAKA_SIGNING_KEY_PATH and the
+        # app read neither: it ran on a frozen clock, two in-memory databases and a signing
+        # key generated fresh on every boot. A restart therefore erased idempotency,
+        # mandate spend, escalations, the audit chain and the identity that signed it --
+        # the checkpoint forgot every promise it had made, and the committed fixtures were
+        # the only durable evidence the demo produced.
+        #
+        # The demo defaults are unchanged, so `make demo` and the tests behave exactly as
+        # before. Setting the paths is what turns this into something that survives being
+        # restarted, and `/api/health` reports which of the two you are running.
+        # A real path, not merely "the variable is set". `:memory:` is a configured
+        # value and an ephemeral one, and reporting it as durable would be the exact
+        # kind of comfortable lie this field exists to prevent.
+        self.durable = any(
+            (os.environ.get(name) or ":memory:") != ":memory:"
+            for name in (STATE_DB_ENV, AUDIT_DB_ENV)
+        )
+        self.clock = (
+            SystemClock()
+            if self.durable and not os.environ.get(DEMO_CLOCK_ENV)
+            # A frozen clock makes the regulatory windows land the same way on every run,
+            # which is what a demo wants and what a deployment must never have.
+            else FrozenClock.at_ist(os.environ.get(DEMO_CLOCK_ENV) or DEMO_CLOCK)
+        )
+        key_path = os.environ.get(SIGNING_KEY_ENV)
+        self.signer = MandateSigner(
+            load_or_create_signing_key(key_path) if key_path else generate_keypair()[0]
+        )
         # In a deployment the issuer lives on the shopper's side of the boundary and
         # the gate never sees the private key. Here there is one process, so they are
         # co-located -- a property of the demo, not of the design. The engine below is
@@ -105,8 +144,8 @@ class Hub:
         self.approvers = load_approvers(self.callers)
         # Enforce unless the operator asked for otherwise, and fail to start on a typo.
         self.mode = Mode.from_env()
-        self.state = SqliteState(":memory:", clock=self.clock)
-        self.audit = AuditChain(":memory:", clock=self.clock)
+        self.state = SqliteState(os.environ.get(STATE_DB_ENV, ":memory:"), clock=self.clock)
+        self.audit = AuditChain(os.environ.get(AUDIT_DB_ENV, ":memory:"), clock=self.clock)
         self.policy = Policy.from_yaml("policy.yaml")
         # After `state`, which it writes to.
         self.grants = Grants(self.state, self.signer.verifier())
@@ -265,6 +304,12 @@ def health() -> dict[str, Any]:
         "test_mode": True,
         "merchant": hub.policy.merchant,
         "audit_records": len(hub.audit),
+        # Whether anything here survives a restart. Reported rather than assumed, because
+        # the difference between a demo and a deployment is not visible from the outside
+        # and an operator should not have to guess which one they are running.
+        "durable": hub.durable,
+        "clock": "system" if hub.durable and not os.environ.get(DEMO_CLOCK_ENV) else "frozen",
+        "signing_key": "persistent" if os.environ.get(SIGNING_KEY_ENV) else "generated-at-boot",
     }
 
 

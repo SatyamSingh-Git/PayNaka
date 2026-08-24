@@ -35,8 +35,12 @@ from paynaka.rails.sim import SimRail
 from paynaka.state import SqliteState
 from paynaka.tty import BOLD, DIM, GREEN, OFF, RED, say
 
-INTACT = pathlib.Path("var/audit.db")
-TAMPERED = pathlib.Path("var/audit-tampered.db")
+# Under `fixtures/`, deliberately away from PAYNAKA_AUDIT_DB's usual value. These are
+# evidence, and a live run pointed at the same path appends to them: wiring the durable
+# runtime turned the committed 3-record chain into 31 records of test traffic before
+# anybody noticed. Evidence a normal run can write to is not evidence.
+INTACT = pathlib.Path("var/fixtures/audit-intact.db")
+TAMPERED = pathlib.Path("var/fixtures/audit-tampered.db")
 
 ATTA = "ATTA-5KG"
 GIFT = "GIFT-50K"
@@ -125,8 +129,8 @@ def main() -> int:
 
     say()
     say(f"{BOLD}Try it:{OFF}")
-    say(f"  {DIM}PAYNAKA_AUDIT_DB={INTACT}    python -m paynaka.audit --verify{OFF}")
-    say(f"  {DIM}PAYNAKA_AUDIT_DB={TAMPERED}  python -m paynaka.audit --verify{OFF}")
+    say(f"  {DIM}python -m paynaka.audit --db {INTACT} --verify{OFF}")
+    say(f"  {DIM}python -m paynaka.audit --db {TAMPERED} --verify{OFF}")
     say()
     if broken is None:  # pragma: no cover - the tamper always breaks the chain
         say(f"{RED}the tampered chain still verifies; the fixture proves nothing{OFF}")
