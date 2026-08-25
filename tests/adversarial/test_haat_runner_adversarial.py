@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from haat.defences import DEFENCE_NAMES, NakaDefence, NoDefence, PromptDefence, build_defence
+from haat.freeze import freeze_tag_exists, under_version_control
 from haat.report import summarise, write_results
 from haat.runner import RunConfig, _completed, _poison, main, run_attack
 from haat.schema import RunResult, load_corpus
@@ -150,16 +151,26 @@ class TestSealedCorpusDiscipline:
 
         The tag exists now, so the sealed corpus may run -- and the held-out sentinel score
         has been taken and published: 64.4% against 92.1% on the visible families. The
-        assertion is inverted rather than deleted because the tag is load-bearing. Deleting
-        it locally would silently re-open the sealed corpus to a run that nothing gates.
+        assertion is inverted rather than deleted because the tag is the anchor those two
+        numbers hang from: it is what dates the sealed families as untouched at the moment
+        they were scored. Losing it does not unlock anything, it unevidences a claim.
+
+        **It asks only where the question has an answer.** A reviewer who downloads the
+        GitHub ZIP has no history at all, and this used to fail in their terminal -- a red
+        `check` reporting a defect that was in their filesystem rather than in the code.
+        A skip that names what could not be verified is the honest result there; the
+        runtime guard refuses the sealed corpus in that state regardless.
         """
-        result = subprocess.run(
-            ["git", "rev-parse", "v1.0-freeze"],
-            capture_output=True,
-        )
-        assert result.returncode == 0, (
+        if not under_version_control():
+            pytest.skip("not a git work tree here -- a source download carries no tags")
+        if not subprocess.run(
+            ["git", "tag", "--list"], capture_output=True, text=True, check=False
+        ).stdout.strip():
+            pytest.skip("no tags fetched here -- a shallow clone cannot answer this")
+
+        assert freeze_tag_exists(), (
             "v1.0-freeze is missing. It was cut once and the held-out evidence was spent "
-            "against it; without the tag the sealed corpus is ungated."
+            "against it; without the tag the generalisation claim has no anchor."
         )
 
     def test_the_guard_permits_the_sealed_corpus_once_the_tag_exists(self, monkeypatch) -> None:

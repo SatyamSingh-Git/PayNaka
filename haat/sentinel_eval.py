@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +34,7 @@ from typing import Any
 
 import yaml
 
+from haat.freeze import freeze_tag_exists
 from haat.schema import SEALED, AttackCase, load_corpus
 from merchant.catalog import CATALOG
 from paynaka.sentinel import THRESHOLD, Scan, scan
@@ -272,17 +272,13 @@ def _per_rule(results: Results) -> None:
 
 
 def _frozen() -> bool:
-    """Whether the freeze tag exists. Until it does, the sealed families are off limits."""
-    try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "v1.0-freeze"],  # noqa: S607
-            capture_output=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):  # pragma: no cover - no git, no freeze
-        return False
-    return completed.returncode == 0
+    """Whether the freeze tag exists. Until it does, the sealed families are off limits.
+
+    One implementation, in `haat.freeze`, shared with the runner's guard. Two copies of a
+    refusal is two refusals that can disagree, and the one that opens is the one nobody
+    notices.
+    """
+    return freeze_tag_exists()
 
 
 def main(argv: list[str] | None = None) -> int:

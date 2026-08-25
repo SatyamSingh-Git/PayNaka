@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import threading
 import time
@@ -35,6 +34,7 @@ from buyer.agent import BuyerAgent, load_prompt
 from buyer.brains import Brain, ScriptedBrain, build_brain
 from buyer.tools import ToolBox
 from haat.defences import DEFENCE_NAMES, build_defence
+from haat.freeze import freeze_tag_exists
 from haat.report import write_results
 from haat.runlock import RunLock, RunStamp, SweepConflict
 from haat.schema import AttackCase, BenignCase, RunResult, load_corpus
@@ -452,15 +452,13 @@ def run_corpus(config: RunConfig) -> list[RunResult]:
 
 # ====================================================================== cli
 def _freeze_tag_exists() -> bool:
-    try:
-        subprocess.run(
-            ["git", "rev-parse", "v1.0-freeze"],  # noqa: S607
-            check=True,
-            capture_output=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
-    return True
+    """Kept as a module-level name so the discipline tests can patch it both ways.
+
+    The answer comes from `haat.freeze`, which asks *this* repository rather than whatever
+    directory the reader is standing in. See that module for why the distinction is not
+    academic.
+    """
+    return freeze_tag_exists()
 
 
 def main(argv: list[str] | None = None) -> int:

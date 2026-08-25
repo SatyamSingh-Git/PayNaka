@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from hypothesis import HealthCheck, settings
@@ -176,4 +177,61 @@ def _ephemeral_runtime(
     # test run signs with -- and creates -- the developer's real `var/mandate_ed25519.key`.
     monkeypatch.setenv(
         "PAYNAKA_SIGNING_KEY_PATH", str(tmp_path_factory.mktemp("keys") / "signing.key")
+    )
+
+
+# ---------------------------------------------------------------- committed evidence
+#: Files that are *results*, not fixtures. Every number the README, RESULTS.md and
+#: docs/EXPERIMENT.md quote is read from one of these, and each was produced by a named
+#: command that a reader can re-run. A test run is not that command.
+COMMITTED_EVIDENCE = (
+    "RESULTS.md",
+    "RESULTS.json",
+    "haat/out/visible.jsonl",
+    "haat/out/modelfree.jsonl",
+    "haat/out/deepseek/visible.jsonl",
+    "haat/out/poolside/visible.jsonl",
+    "haat/out/upstage/visible.jsonl",
+    "haat/out/naka-deepseek/visible.jsonl",
+    "haat/out/naka-poolside/visible.jsonl",
+    "haat/out/naka-upstage/visible.jsonl",
+    "var/fixtures/audit-intact.db",
+    "var/fixtures/audit-tampered.db",
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _committed_evidence_is_read_only() -> Iterator[None]:
+    """Running the tests must not rewrite the results the project publishes.
+
+    This has now happened twice, in two different ways, and neither failed anything. The
+    audit fixture grew from a 3-record chain of evidence to 31 records of test traffic
+    because the app honoured a developer's `.env`. Then a test that only wanted to inspect
+    a JSONL called `haat.modelfree.main` with `--out` redirected and `--results` left at
+    its default, so every `check` regenerated `RESULTS.md` and `RESULTS.json` in place --
+    same numbers, new timestamp, and a working tree that came back dirty for anyone who
+    ran the suite.
+
+    Same numbers is the lucky case. The dangerous one is a suite run in some state the
+    published tables were not measured in, silently replacing the evidence with itself.
+
+    So the bytes are recorded before the first test and checked after the last. This
+    catches the whole class -- any test, any mechanism, including ones written later --
+    rather than the one call that was found by reading a `git status`.
+    """
+    root = Path(__file__).resolve().parents[1]
+    before = {
+        name: (root / name).read_bytes() for name in COMMITTED_EVIDENCE if (root / name).is_file()
+    }
+    yield
+    changed = [
+        name
+        for name, original in before.items()
+        if (root / name).is_file() and (root / name).read_bytes() != original
+    ]
+    assert not changed, (
+        "the test suite rewrote committed evidence: "
+        + ", ".join(sorted(changed))
+        + ". These files are outputs of named commands a reader re-runs, not scratch space. "
+        "Point the test at tmp_path."
     )
