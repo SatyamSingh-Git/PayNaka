@@ -57,7 +57,7 @@ check: lint types test secrets ## everything CI runs
 # ------------------------------------------------------------------ run
 .PHONY: dev
 dev: console-data approver-token ## merchant :8001 + paynaka :8002 + console :5173
-	@echo "starting merchant :8001, paynaka :8002, console :5173"
+	@echo starting merchant :8001, paynaka :8002, console :5173
 	@$(PY) uvicorn merchant.app:app --port 8001 --reload & \
 	 $(PY) uvicorn paynaka.app:app  --port 8002 --reload & \
 	 cd console && npm run dev
@@ -148,9 +148,9 @@ sentinel-sealed: ## score the detector on held-out families. refuses before the 
 
 .PHONY: audit-verify
 audit-verify: ## recompute the committed chains: one intact, one tampered
-	@echo "-- intact --"
+	@echo -- intact --
 	@$(PY) python -m paynaka.audit --db var/fixtures/audit-intact.db --verify
-	@echo "-- tampered (a denial rewritten as an approval) --"
+	@echo -- tampered: a denial rewritten as an approval --
 	@$(PY) python -m paynaka.audit --db var/fixtures/audit-tampered.db --verify || true
 
 .PHONY: seed-audit

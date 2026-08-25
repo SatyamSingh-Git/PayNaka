@@ -155,8 +155,19 @@ poisoned catalog ──untrusted──▶ buyer agent ──ask──▶ ┏━�
 
 ```bash
 uv sync --all-extras
-make check                    # lint · types · tests · secret scan
 ```
+
+**Windows, macOS or Linux — this works everywhere:**
+
+```bash
+python make.py check          # lint · types · tests · secret scan
+python make.py --list         # every task, with a one-line description
+```
+
+`make` is not installed on a default Windows box, and every command below is a task name.
+[`make.py`](make.py) runs them on any OS — it *reads* the Makefile rather than copying it, so
+the two cannot drift. If you have `make`, `make check` works identically and the rest of this
+page uses that spelling for brevity.
 
 **One command, the whole argument, about ninety seconds:**
 
