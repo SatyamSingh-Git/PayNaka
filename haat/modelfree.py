@@ -2,9 +2,9 @@
 
 HAAT ships 540 injection cases and four defence strategies, and the four-way comparison --
 the actual deliverable -- is empty. Not because the harness is broken: because the attack
-does not land. Plain-text catalogue injection moved money in 0 of 18 preflight runs with
-the checkpoint switched off, and a sweep run anyway would have printed four rows of 0% that
-look like a triumph to anyone skimming.
+lands rarely. Plain-text catalogue injection breached 4 times in 752 undefended runs across
+three labs -- real, and expensive when it happens, but far too sparse to fill a four-way
+comparison table with.
 
 Meanwhile the two attacks in this repository that *do* land every time were never wired to
 the benchmark at all. They live in bespoke scripts with bespoke output:

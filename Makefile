@@ -114,6 +114,10 @@ toctou: ## price changes between reading it and paying it. no model, no keys.
 toctou-probe: ## cents: do real agents notice the price changed? (needs a model key)
 	$(PY) python -m scripts.probe_toctou
 
+.PHONY: replay-breaches
+replay-breaches: ## every request that escaped a mandate, put back through the gate
+	$(PY) python -m scripts.replay_breaches
+
 .PHONY: modelfree
 modelfree: ## the four defences over the attacks that land. no model, no keys.
 	$(PY) python -m haat.modelfree

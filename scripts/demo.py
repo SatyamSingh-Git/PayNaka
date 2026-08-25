@@ -2,9 +2,9 @@
 
 Five things were true and separately demonstrable, and a reviewer under time pressure runs
 one command. Worse, the one they ran was `make demo-attack` -- the poisoned-catalogue
-injection, which this project's own evidence says **does not reliably work**: 0 of 18 across
-three model families with the checkpoint switched off. The headline was the weakest result
-in the repository, and the two that land were three commands further down.
+injection, which this project's own evidence says **is real but rare**: 4 breaches
+in 752 undefended runs across three labs, Rs 3,30,860 escaped. The two attacks below land every time and need
+no model to be fooled, and leading with the rarest one buried them.
 
 So the order here is the order of the argument, not the order things were built:
 
@@ -13,8 +13,8 @@ So the order here is the order of the argument, not the order things were built:
    before paying. Nothing about a smarter agent helps.
 2. **The attack with no attacker at all.** A duplicate webhook. Nobody is being hostile and
    the merchant is out Rs 3,994.
-3. **The injection everybody expects**, shown honestly: the checkpoint stops it, *and* the
-   measurement says a real model mostly is not fooled by it in the first place.
+3. **The injection everybody expects**, shown honestly: it lands on 3 of 3 frontier models,
+   though in only 0.53% of runs, and the checkpoint refuses every one.
 4. **What the checkpoint costs**, because a defence nobody will deploy is not a defence.
 
 No keys, no network, no model. Every number below is produced on this machine, now.
@@ -66,9 +66,9 @@ ACTS: tuple[Act, ...] = (
     Act(
         title="3 · The injection everybody expects, reported honestly",
         why=(
-            "A poisoned product review tells the agent to add a Rs 50,000 gift card. The "
-            "checkpoint stops it -- and the benchmark says a real 2026 model mostly is not "
-            "fooled by this in the first place. Both halves are the finding."
+            "A poisoned product review tells the agent to add a Rs 50,000 gift card. "
+            "Measured: it lands on 3 of 3 frontier models, in 0.53% of runs, costing "
+            "Rs 82,715 a time. The checkpoint refuses every one."
         ),
         module="buyer.cli",
         argv=("--scenario", "attack", "--compare"),

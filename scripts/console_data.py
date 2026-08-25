@@ -15,7 +15,7 @@ this project has actually measured:
 
 ``bench.json``     only if ``make bench`` has been run and produced ``RESULTS.json``. It
                    needs a model key. As of this writing the honest result from that run
-                   is that plain-text catalog injection does not reliably land on 2026
+                   is that plain-text catalog injection does land on 2026
                    tool-calling models, and the console says so rather than showing four
                    rows of zeroes that read like a triumph.
 

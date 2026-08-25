@@ -49,6 +49,8 @@ runs/
 # describes one machine's run, and neither is evidence of anything.
 haat/out/*.lock
 haat/out/*.stamp
+haat/out/**/*.lock
+haat/out/**/*.stamp
 haat/.cache/
 
 # ---- editors / os ----
