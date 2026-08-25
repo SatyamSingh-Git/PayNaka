@@ -179,3 +179,60 @@ class TestTheSecretScanIsHonestWhenItCannotRun:
 
         source = Path(secret_scan.__file__).read_text(encoding="utf-8")
         assert "no scan ran" in source
+
+
+class TestRecipesRunOnWindowsToo:
+    """Three POSIX-isms reached a reader's PowerShell before anyone noticed. Each failed in
+    a different way, and the quiet ones were the worse ones."""
+
+    def test_no_posix_only_command_in_any_recipe(self) -> None:
+        """`|| true` printed "'true' is not recognized" and made `audit-verify` exit 1 -- a
+        task whose whole job is to show a *deliberate* failure being detected, reporting a
+        real one instead. `-` is make's own ignore-failure prefix and works on both."""
+        posix_only = ("|| true", "command -v", "&& true")
+        offenders = [
+            line.strip()
+            for line in MAKEFILE_TEXT.splitlines()
+            if line.startswith("\t") and any(token in line for token in posix_only)
+        ]
+        assert not offenders, f"POSIX-only construct in a recipe: {offenders}"
+
+    @pytest.mark.parametrize(
+        ("recipe", "want_quiet", "want_keep_going"),
+        [
+            ("@echo hi", True, False),
+            ("-echo hi", False, True),
+            ("-@echo hi", True, True),
+            ("@-echo hi", True, True),
+            ("echo hi", False, False),
+        ],
+    )
+    def test_prefixes_are_peeled_in_any_order(
+        self, recipe: str, want_quiet: bool, want_keep_going: bool
+    ) -> None:
+        """make accepts `@` and `-` in either order. Peeling them in one guessed sequence
+        left `-@cmd` echoing a command that still began with `@`."""
+        command = recipe
+        quiet = keep_going = False
+        while command[:1] in "@-":
+            quiet |= command[0] == "@"
+            keep_going |= command[0] == "-"
+            command = command[1:]
+        assert (quiet, keep_going, command.strip()) == (want_quiet, want_keep_going, "echo hi")
+
+
+class TestTheEnvInstructionCannotDestroyKeys:
+    """`cp .env.example .env` is in a README, so it is run by people who have not read the
+    rest of it. A reader with live keys in `.env` followed it and lost them -- silently,
+    because `cp` succeeds."""
+
+    def test_the_readme_no_longer_prescribes_a_clobbering_copy(self) -> None:
+        readme = Path("README.md").read_text(encoding="utf-8")
+        assert "cp .env.example .env" not in readme
+
+    def test_the_task_refuses_rather_than_overwrites(self) -> None:
+        from scripts import make_env
+
+        source = Path(make_env.__file__).read_text(encoding="utf-8")
+        assert "if TARGET.exists()" in source
+        assert "Leaving it exactly as it is" in source

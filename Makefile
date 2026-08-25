@@ -12,7 +12,11 @@ help: ## show this help
 setup: ## install python + node deps and pre-commit hooks
 	uv sync --all-extras
 	cd console && npm install
-	$(PY) pre-commit install || true
+	-$(PY) pre-commit install
+
+.PHONY: env
+env: ## create .env from the template, refusing to overwrite an existing one
+	@$(PY) python -m scripts.make_env
 
 # ------------------------------------------------------------------ quality
 .PHONY: lint
@@ -149,7 +153,7 @@ audit-verify: ## recompute the committed chains: one intact, one tampered
 	@echo -- intact --
 	@$(PY) python -m paynaka.audit --db var/fixtures/audit-intact.db --verify
 	@echo -- tampered: a denial rewritten as an approval --
-	@$(PY) python -m paynaka.audit --db var/fixtures/audit-tampered.db --verify || true
+	-@$(PY) python -m paynaka.audit --db var/fixtures/audit-tampered.db --verify
 
 .PHONY: seed-audit
 seed-audit: ## regenerate the committed audit fixtures
@@ -157,8 +161,7 @@ seed-audit: ## regenerate the committed audit fixtures
 
 .PHONY: clean
 clean: ## remove generated artifacts (never touches source)
-	rm -rf .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage haat/out var
-	find . -type d -name __pycache__ -not -path './.git/*' -exec rm -rf {} + 2>/dev/null || true
+	$(PY) python -m scripts.clean
 
 .PHONY: approver-token
 approver-token: ## mint the dev approver credential and hand it to the console

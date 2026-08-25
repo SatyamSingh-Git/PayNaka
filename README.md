@@ -203,7 +203,7 @@ python make.py demo-attack              # poisoned catalog, checkpoint off then 
 These reach the network:
 
 ```bash
-cp .env.example .env          # Razorpay TEST keys + a model key
+python make.py env            # creates .env from the template, never overwrites one
 python make.py razorpay-lifecycle       # a REAL test-mode order, through the gate → var/evidence/
 python make.py toctou-probe             # cents: do real agents notice the price changed?
 python make.py bench                    # the injection corpus against four defences (needs a model key)

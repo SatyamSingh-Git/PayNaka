@@ -130,10 +130,15 @@ def run(name: str, tasks: dict[str, Task], variables: dict[str, str], seen: set[
     for line in task.lines:
         command = expand(line, variables)
 
-        # `@` suppresses echo; `-` ignores failure. Both are make's, and both appear here.
-        quiet = command.startswith("@")
-        keep_going = command.lstrip("@").startswith("-")
-        command = command.lstrip("@").lstrip("-").strip()
+        # `@` suppresses echo, `-` ignores failure. make accepts them in either order and
+        # in either combination, so they are peeled in a loop rather than in one guessed
+        # sequence -- `-@cmd` otherwise leaves the `@` in the command that gets echoed.
+        quiet = keep_going = False
+        while command[:1] in "@-":
+            quiet |= command[0] == "@"
+            keep_going |= command[0] == "-"
+            command = command[1:]
+        command = command.strip()
         if not command:
             continue
 
