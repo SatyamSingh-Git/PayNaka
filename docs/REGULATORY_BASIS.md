@@ -1,34 +1,31 @@
-# Regulatory basis — and the limits of that phrase
+# Regulatory basis
 
-This file exists because the project claimed more than it had checked.
+`policy.yaml` carries five rules expressed in wall-clock and rupee terms — a contact window,
+a debit blackout, a retry ceiling, an additional-factor threshold, a pre-debit notice period.
+This file says what they are, what they are not, and what each one needs before it governs
+real money.
 
-`policy.yaml` carried five rules with comments attributing them to RBI and NPCI, and
-`clock.py` opened by saying PayNaka *"encodes real Indian payments regulation."* An
-independent review pointed out that these rules have **different scopes** than the flat
-statements implied, and that at least two of them were being applied far more broadly than
-their source supports.
+## What these rules are
 
-That is a serious kind of wrong for a payments project. A merchant who reads "RBI: Rs 15,000
-additional-factor ceiling" in a config file and ships it has been told something by this
-repository, and this repository had not verified it.
+**Configurable policy examples, not compliance.** They ship as realistic defaults so the
+time-and-limit machinery has something concrete to enforce, and so the regulatory checks are
+demonstrable without inventing fictional rules. That is the whole of the claim.
 
-## What these rules actually are
+**Unverified.** No rule in `policy.yaml` has been checked against a primary source by this
+project. Every one needs the review below before it is enabled for real money.
 
-**They are configurable policy examples, not compliance.** They are shipped as realistic
-defaults so the time-and-limit machinery has something concrete to enforce, and so the
-regulatory checks are demonstrable without inventing fictional rules. That is the whole of
-the claim.
+**Not a compliance mechanism.** Compliance is a property of a business process — its scope,
+its exceptions, its evidence. The most a gate can do is enforce a threshold somebody else
+established, for the right product and the right action.
 
-**No rule in `policy.yaml` has been verified against a primary source by this project.**
-Every one of them needs the review below before it governs real money.
+## Scope, and why a flat number misleads
 
-**A code rule cannot produce compliance in any case.** Compliance is a property of a
-business process, its scope, its exceptions and its evidence. The most a gate can do is
-enforce a threshold somebody else established for the right product and the right action.
+Each rule below has a narrower scope than a single value suggests. Two are commonly applied
+far more broadly than their source supports.
 
-## The specific overclaims
+## The five rules
 
-| Rule in `policy.yaml` | What was implied | What is actually the case |
+| Rule in `policy.yaml` | A flat reading implies | The actual scope |
 |---|---|---|
 | `afa_threshold: 1500000` | a universal ₹15,000 additional-factor ceiling | Recurring e-mandate AFA thresholds are **category-specific** and have been revised upward for several categories. A single flat number is not the rule. |
 | `contact_window: "08:00-19:00"` | general customer-contact hours for payments | The 08:00–19:00 restriction appears in RBI material on **recovery agents and debt collection**, not general payment-customer contact. Applying it to all contact is broader than the source. |
@@ -36,7 +33,8 @@ enforce a threshold somebody else established for the right product and the righ
 | `npci_mandate_retries: 3` | a fixed NPCI retry ceiling | Retry limits vary by mandate type and scheme rules and change over time. |
 | `pre_debit_notice_seconds: 86400` | a fixed RBI 24-hour notice requirement | Pre-debit notification requirements exist for recurring e-mandates; the exact window and the products in scope must be checked against the current circular. |
 
-Sources the review cited as starting points, **not as verification**:
+Starting points for that check. **These are where to begin reading, not evidence that
+any rule above is correct as configured:**
 
 - NPCI UPI AutoPay — <https://www.npci.org.in/product/autopay>
 - RBI material on recurring e-mandate limits — <https://www.rbi.org.in/Scripts/PublicationsView.aspx?id=22394>
@@ -59,15 +57,14 @@ Fill this in per rule, per deployment. An empty row is a rule that must not be e
 The last row is the only one this repository can answer today: **fail closed**. A
 regulatory check that cannot be evaluated denies, and that is tested.
 
-## What was changed
+## How this is reflected in the code
 
-- `policy.yaml` comments now say *example, unverified* rather than naming a regulator as
-  though it were a citation.
-- `clock.py` no longer opens by claiming to encode real regulation. It encodes
-  wall-clock-shaped rules, which is what it does.
-- Gate refusals name the **configured policy**, not the regulator, so an operator reading a
-  denial is not told a rule came from RBI when this project has not checked that it did.
+- `policy.yaml` comments mark each value *example, unverified* rather than naming a regulator
+  as though it were a citation.
+- Gate refusals name the **configured policy**, not the regulator — an operator reading a
+  denial is never told a rule came from RBI when this project has not checked that it did.
+- `clock.py` describes what it does: enforce rules expressed in wall-clock terms.
 
-The machinery is unchanged and still worth having: IST-correct windows, an injectable clock,
-midnight-wrapping ranges, and deterministic evaluation. What changed is that it no longer
-tells you the numbers are law.
+The machinery is worth having on its own terms — IST-correct windows, an injectable clock so
+any hour is testable, ranges that wrap midnight, and deterministic evaluation. It simply does
+not tell you the numbers are law.

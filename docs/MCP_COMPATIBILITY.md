@@ -1,67 +1,73 @@
-# MCP compatibility — what this actually is
+# MCP compatibility
 
-The README used to say *"same tool names, same schemas"*. That was true of the five tools
-here and false as a general statement, and an independent review was right to call it an
-overclaim.
+PayNaka exposes an MCP server that speaks the same protocol as Razorpay's, so an agent can
+be pointed at it by changing one URL. It is **a gated subset, not a replacement**: five
+tools, three of which move money and are checked against a signed mandate before they run.
 
-**What this is: a gated subset, deliberately small.** Five tools, chosen because three of
-them move money and two are the reads a buying agent needs to check its own work. It is a
-proof that a checkpoint can sit in front of an MCP server without the agent's code changing
-— not a drop-in replacement for Razorpay's own server.
+Read this before pointing an agent here, because an agent written against Razorpay's own
+server will behave differently in the four ways listed under *Divergences*.
 
-**What it is not: coverage.** The official Razorpay MCP server publishes 35+ tools across
-payments, orders, refunds, settlements, payment links, QR codes, invoices and more. Nothing
-here reimplements those, and pointing an agent that uses them at this endpoint will fail on
-everything outside the table below.
+## Tool matrix
 
-## The matrix
+| Tool | Status | Behaviour |
+| --- | --- | --- |
+| `create_order` | **gated** | checked against the mandate, then forwarded |
+| `capture_payment` | **gated** | checked against the mandate, then forwarded |
+| `create_refund` | **gated** | checked, plus a balance claim against the ledger |
+| `fetch_payment` | pass-through | reads are not authority, so no mandate is required |
+| `fetch_all_payments` | **stub** | returns an empty collection — see below |
+| everything else | **absent** | not proxied, not stubbed |
 
-| Tool | Status | Notes |
-|---|---|---|
-| `create_order` | **gated** | checked against the mandate before it runs |
-| `capture_payment` | **gated** | ditto |
-| `create_refund` | **gated** | ditto, plus a balance claim against the ledger |
-| `fetch_payment` | pass-through | reads are not authority; no mandate required |
-| `fetch_all_payments` | **stub** | returns an empty collection. See below. |
-| everything else (30+) | **absent** | not proxied, not stubbed, not planned for a buildathon |
+Razorpay's own server publishes 35+ tools. Anything outside this table will fail here.
 
-### Known divergences from the official server
+## Divergences
 
-These matter more than the count, because each one is a place an agent written against the
-real server behaves differently here.
+Four places where an agent written against Razorpay's server behaves differently.
 
 **`fetch_all_payments` returns an empty list.** It exists so a client that lists on startup
-does not crash. It is a stub and is labelled one; do not read an empty result as "no
-payments".
+does not crash. An empty result means *not implemented*, not *no payments*.
 
 **Money-moving calls require `notes.paynaka_items`.** The mandate checks line items — SKU,
-quantity, unit price — and Razorpay's order schema has no field carrying them, so they ride
-in `notes`. That is an addition to the upstream schema, not a match to it. An agent that
-omits it gets a refusal explaining what is missing.
+quantity, unit price — and Razorpay's order schema has nowhere to carry them, so they ride
+in `notes` as `SKU:qty:unit_paise`, plus `notes.paynaka_destination`. This is an addition to
+the upstream schema. Omit it and the call is refused with an explanation of what is missing.
 
-**Responses carry PayNaka verdict envelopes**, not transparent upstream shapes. A refusal
-is a structured decision with a `check_id`, which is the point of the product and is also a
-difference a client must expect.
+**Responses carry a verdict envelope.** A refusal is a structured decision with a
+`check_id` and a reason, not an upstream error shape. That is the product working, and it is
+a difference a client must expect.
 
 **No version negotiation.** Nothing here pins or contract-tests against a released upstream
 version, so upstream schema drift will not be detected by this repository.
 
-## The honest positioning
+## Binding a mandate
 
-Razorpay's own remote MCP server already restricts some high-risk operations. PayNaka is not
+Money-moving tools need a mandate bound to the session, or they refuse. The flow:
+
+```
+POST /api/intent            (authenticated)  ->  signed mandate + mandate_grant
+POST /mcp   initialize      {"mandateGrant": "..."}  ->  {"boundSession": "sess_..."}
+POST /mcp   tools/call      create_order  ->  checked against that mandate
+```
+
+The grant is short-lived and single-use. Session identity is composed from the
+*authenticated caller*, not from the `mcp-session-id` header, so one caller cannot bind or
+borrow another's session. See [ARCHITECTURE.md](ARCHITECTURE.md) for the trust boundary.
+
+## Positioning
+
+Razorpay's remote server already restricts some high-risk operations. PayNaka is not
 protection Razorpay omitted — it is **finer-grained, merchant-controlled authority**: a
 per-session budget the merchant sets, bound to a signed statement of one shopper's intent,
-enforced by deterministic code that holds no credentials.
+enforced by code that holds no credentials.
 
-That argument does not need a large tool count, and inflating one would weaken it.
+That argument does not need a large tool count, which is why this one is small.
 
-## What closing this properly would take
+## What full compatibility would require
 
-Not planned for the buildathon, listed so the gap is a decision rather than an oversight:
+Out of scope for this build, listed so the gap is a decision rather than an oversight:
 
 1. Transparent pass-through for every read tool, forwarding upstream responses unchanged.
-2. A deliberate, documented adaptation per money-moving tool — the `notes` carrier is a
-   workaround and should become an explicit schema extension with a version.
-3. Pin a released upstream version and contract-test against it in CI, so drift fails a
-   build rather than a customer.
+2. A documented schema extension per money-moving tool, versioned, replacing the `notes`
+   carrier.
+3. A pinned upstream version with contract tests in CI, so drift fails a build.
 4. Version negotiation at `initialize`, so a client learns what it is talking to.

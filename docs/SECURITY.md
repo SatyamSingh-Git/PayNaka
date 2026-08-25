@@ -1,8 +1,7 @@
 # Security
 
-This document is referenced by `make secrets` and by the README, and for a while it did not
-exist — which is itself worth recording, because a security policy that is cited and absent
-is worse than one that was never promised.
+How to report a problem, what this project protects, how credentials are handled, and how to
+reproduce every security claim it makes.
 
 ## Reporting a vulnerability
 

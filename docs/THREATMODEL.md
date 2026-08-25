@@ -171,8 +171,8 @@ that had never been produced. The policy documented a flow that structurally cou
 finish. Step-up is now resolved before the claim -- the same reasoning that already stopped
 a step-up from holding a refund balance: a request waiting on a person holds nothing.
 
-That reordering had to be done carefully, and the first attempt was wrong in a way the
-chaos suite caught. Moving step-up ahead of *all* of idempotency meant a redelivery whose
+The ordering is delicate, and getting it wrong is not obvious — the chaos suite caught one
+such mistake. Moving step-up ahead of *all* of idempotency meant a redelivery whose
 amount was altered in flight came back as `policy.step_up` instead of
 `idempotency.key_reuse` -- so a tampered duplicate landed in an approver's queue instead of
 being refused outright. The money was still safe, because the claim below re-derives the
@@ -290,7 +290,7 @@ different questions and only the first was being asked:
 | `max_total` | does the basket fit the budget? | no |
 | `reference_prices` | is the *thing* still the thing that was agreed? | **yes** |
 
-Measured on the same ₹2,500-budget case that used to slip through:
+Measured on a ₹2,500-budget case, where a budget alone leaves room to reprice into:
 
 | mandate | verdict | held by |
 |---|---|---|

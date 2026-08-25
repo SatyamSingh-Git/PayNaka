@@ -288,7 +288,7 @@ autonomously reaches only the first of those. An order is an *intent to collect*
 has left anybody's account when one is created, and autonomous capture is not something a
 buying agent should be able to do — authentication is the customer's, by design.
 
-So the vocabulary is exact, and it did not used to be:
+So the vocabulary is exact:
 
 | Term | Means |
 |---|---|
@@ -300,9 +300,8 @@ So the vocabulary is exact, and it did not used to be:
 | `captured_paise` | strictly the second and third rows. An order contributes zero. |
 
 **A blocked ₹51,999 order is ₹51,999 of authority refused — not ₹51,999 of prevented
-movement.** The demo previously printed "money moved" for order creation. That was wrong,
-it was the fastest way to lose a reviewer's trust, and it is corrected everywhere including
-the committed evidence files.
+movement.** Calling order creation "money moved" is the fastest way to lose a payments
+reviewer's trust, so no screen, command or evidence file in this repository does.
 
 What that costs the pitch: this is a containment result, not an end-to-end payment result.
 What it buys: every number here means exactly what it says.
@@ -373,9 +372,9 @@ long-lived authority — it should not be travelling on every session-init, logg
 everything in between. A grant is worthless minutes after issue and worthless again the
 moment it is used once.
 
-`/api/intent` authenticates now too. It used to be open, which meant anyone who could reach
-the port could mint themselves a mandate — and the checkpoint would have verified it
-perfectly, because it was genuinely signed.
+`/api/intent` authenticates. Issuing authority is a privileged act: an open issuing surface
+means anyone who can reach the port mints themselves a mandate, and the checkpoint verifies
+it perfectly — because it is genuinely signed.
 
 Seventeen tests drive this over HTTP only. None of them may call `bind()`: a test that
 reaches for the internal helper proves the object works and says nothing about whether
@@ -398,9 +397,9 @@ development mode that skips verification.
 
 And verification is only half of it. The route deduplicates on Razorpay's own
 `X-Razorpay-Event-Id` header — where their documentation puts it, and the only place a
-redelivery reliably repeats it — then records the state transition. It previously
-acknowledged a verified event and applied nothing, which made this section true of the
-engine and untrue of the deployed path.
+redelivery reliably repeats it — then records the state transition. Verification answers
+*who sent this*; applying it is the separate question, and a route that only did the first
+would leave this section true of the engine and untrue of the deployment.
 
 And the line worth drawing: a verified webhook is trusted to have come from Razorpay, and
 nothing more. What it *claims* still passes the ledger's invariants — a genuine
@@ -537,7 +536,7 @@ Both stop the money. Only the second stops it for a reason the shopper chose —
 who never configured a step-up band would have paid the skim. With `--reference`,
 `envelope.price_moved` catches 9 of 9.
 
-## What the threat model used to say it could not do
+## A gap the threat model named, and how it closed
 
 A security claim without a stated boundary is marketing, so
 [THREATMODEL.md](docs/THREATMODEL.md) has always carried a **What is not defended** list.
