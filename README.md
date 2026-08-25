@@ -203,6 +203,9 @@ real Razorpay test-mode API.
 
 ## The experiment
 
+> The full write-up — method, per-family results, the four breaches narrated, threats to
+> validity and the raw-data manifest — is [docs/EXPERIMENT.md](docs/EXPERIMENT.md).
+
 **Question.** If a buying agent is given a poisoned catalogue and no checkpoint, does money
 leave the account? And if the same agent, on the same cases, runs behind PayNaka, does it
 stop?
@@ -984,6 +987,7 @@ Every term this README uses that is not ordinary English, in the order you meet 
 | Document | Contents |
 | -------- | -------- |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | trust boundary, components, the decision pipeline, why the credential split is the whole idea |
+| [EXPERIMENT.md](docs/EXPERIMENT.md) | the full experimental report: 1,512 runs, method, per-family results, threats to validity |
 | [THREATMODEL.md](docs/THREATMODEL.md) | what is defended, what is not, and the design refusals |
 | [SECURITY.md](docs/SECURITY.md) | reporting, credential handling, the trust boundary, how to reproduce every security claim |
 | [REGULATORY_BASIS.md](docs/REGULATORY_BASIS.md) | why the RBI/NPCI values are **configurable examples, unverified**, and what each needs before it governs real money |
