@@ -15,6 +15,7 @@ next to the first.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -129,3 +130,52 @@ class TestItDoesNotBecomeASecondCopy:
             if line.startswith("\t") and line.lstrip("\t@").startswith('echo "')
         ]
         assert not offenders, f"quoted echo will print literal quotes on Windows: {offenders}"
+
+
+class TestTheReadmeOnlyTellsPeopleToRunThingsThatWork:
+    """A reader copies commands out of the README verbatim. Every one of them must work on
+    the machine they are sitting at, which for a reviewer is as likely to be Windows as not.
+
+    This exists because a reader followed the Quickstart on PowerShell and the very first
+    command failed -- and then, after that was fixed, `make demo` further down failed the
+    same way.
+    """
+
+    README = Path("README.md").read_text(encoding="utf-8")
+
+    def test_no_bare_make_command_is_prescribed(self) -> None:
+        """`make X` at the start of a line is a command a reader will paste. On Windows it
+        is a command that does not exist."""
+        offenders = [
+            line.strip()
+            for line in self.README.splitlines()
+            if re.match(r"^\s*make\s+[a-z][a-z-]*", line)
+        ]
+        assert not offenders, f"README prescribes `make` directly: {offenders}"
+
+    def test_every_prescribed_task_exists(self, parsed) -> None:  # type: ignore[no-untyped-def]
+        """Catches the other direction: a command that is portable and names a task that was
+        renamed or never existed."""
+        tasks, _ = parsed
+        named = set(re.findall(r"python make\.py ([a-z][a-z-]*)", self.README))
+        assert named, "no portable commands found in the README"
+        assert named <= set(tasks), f"README names missing tasks: {sorted(named - set(tasks))}"
+
+
+class TestTheSecretScanIsHonestWhenItCannotRun:
+    """The recipe used to be `command -v gitleaks && ... || echo`, which is POSIX. On Windows
+    it printed "The system cannot find the path specified" and then reported success -- a
+    security check that was absent and quiet about it, which is the worst state available."""
+
+    def test_the_recipe_is_not_a_posix_shell_builtin(self) -> None:
+        source = MAKEFILE_TEXT
+        assert "command -v" not in source, (
+            "`command -v` is a POSIX builtin; cmd.exe does not have it and fails silently"
+        )
+
+    def test_a_missing_scanner_says_no_scan_ran(self) -> None:
+        """Not 'passed'. The distinction is the entire point."""
+        from scripts import secret_scan
+
+        source = Path(secret_scan.__file__).read_text(encoding="utf-8")
+        assert "no scan ran" in source

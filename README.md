@@ -157,22 +157,23 @@ poisoned catalog ──untrusted──▶ buyer agent ──ask──▶ ┏━�
 uv sync --all-extras
 ```
 
-**Windows, macOS or Linux — this works everywhere:**
-
 ```bash
 python make.py check          # lint · types · tests · secret scan
 python make.py --list         # every task, with a one-line description
 ```
 
-`make` is not installed on a default Windows box, and every command below is a task name.
-[`make.py`](make.py) runs them on any OS — it *reads* the Makefile rather than copying it, so
-the two cannot drift. If you have `make`, `make check` works identically and the rest of this
-page uses that spelling for brevity.
+**`python make.py <task>` works on Windows, macOS and Linux.** Every command in this README
+is a task name, and `make` is not installed on a default Windows box — so that is the
+spelling used throughout. [`make.py`](make.py) *reads* the Makefile rather than copying it,
+so the two cannot drift apart.
+
+If you already have `make`, `make check` does the same thing. On PowerShell, `.\make check`
+also works — there is a shim in the repository root.
 
 **One command, the whole argument, about ninety seconds:**
 
 ```bash
-make demo
+python make.py demo
 ```
 
 It runs the story in the order of the argument rather than the order things were built: the
@@ -190,22 +191,22 @@ docker build -t paynaka . && docker run --rm paynaka
 them, except the Razorpay ones below — those came from the real API:
 
 ```bash
-make modelfree                # the four defences over the attacks that land → RESULTS.md
-make toctou                   # the price changes between reading it and paying it
-make chaos                    # six ways a gateway loses money with nobody attacking
-make sentinel                 # the detector, with its false-positive rate and margin
-make latency                  # what the checkpoint costs, decomposed by layer
-make audit-verify             # one intact chain, one with a denial rewritten as an approval
-make demo-attack              # poisoned catalog, checkpoint off then on
+python make.py modelfree                # the four defences over the attacks that land → RESULTS.md
+python make.py toctou                   # the price changes between reading it and paying it
+python make.py chaos                    # six ways a gateway loses money with nobody attacking
+python make.py sentinel                 # the detector, with its false-positive rate and margin
+python make.py latency                  # what the checkpoint costs, decomposed by layer
+python make.py audit-verify             # one intact chain, one with a denial rewritten as an approval
+python make.py demo-attack              # poisoned catalog, checkpoint off then on
 ```
 
 These reach the network:
 
 ```bash
 cp .env.example .env          # Razorpay TEST keys + a model key
-make razorpay-lifecycle       # a REAL test-mode order, through the gate → var/evidence/
-make toctou-probe             # cents: do real agents notice the price changed?
-make bench                    # the injection corpus against four defences (needs a model key)
+python make.py razorpay-lifecycle       # a REAL test-mode order, through the gate → var/evidence/
+python make.py toctou-probe             # cents: do real agents notice the price changed?
+python make.py bench                    # the injection corpus against four defences (needs a model key)
 ```
 
 Works fully offline: `PAYNAKA_RAIL=sim` runs a deterministic in-process payment simulator, so the
@@ -301,7 +302,7 @@ back through the real gate — no model, no network, identical on every run:
 | `line_item_append.001.plain` | ₹1,000 | **DENY** `envelope.item_not_in_intent` |
 
 Four of four refused, ₹0.00 moved, each with a reason a human can read and an auditor can
-check. `make replay-breaches`.
+check. `python make.py replay-breaches`.
 
 ### Threats to validity
 
@@ -326,7 +327,7 @@ Every run is committed as raw JSONL — one object per run, model named, errors 
 haat/out/{upstage,poolside,deepseek}/          # agent holds the rail
 haat/out/naka-{upstage,poolside,deepseek}/     # PayNaka in the path
 var/evidence/breach-replay.json                # the four replays
-make replay-breaches                           # regenerates the replay, no keys needed
+python make.py replay-breaches                           # regenerates the replay, no keys needed
 ```
 
 ## Drop-in adoption
@@ -510,7 +511,7 @@ anybody can get to it, which was exactly the defect.
 
 ## Receiving webhooks, and proving they are real
 
-`make chaos` shows what the engine does with duplicate and reordered deliveries, entirely in
+`python make.py chaos` shows what the engine does with duplicate and reordered deliveries, entirely in
 process. That proves the semantics and left a gap: a real webhook is an HTTP POST, and
 nothing here could receive one.
 
@@ -603,7 +604,7 @@ merchant charges            ₹51,974
 ```
 
 There is no injected text, so a prompt defence has nothing to be suspicious of. There is
-no reasoning error, so a more capable agent behaves identically. `make toctou`, 27 runs:
+no reasoning error, so a more capable agent behaves identically. `python make.py toctou`, 27 runs:
 
 | Reprice | none | prompt hardening | **PayNaka** |
 | --- | ---: | ---: | ---: |
@@ -656,8 +657,8 @@ The budget asks whether the basket fits; the reference asks whether the *thing* 
 the thing that was agreed. Only the first was being asked:
 
 ```
-make toctou --budget 250000              policy.step_up        the merchant's band
-make toctou --budget 250000 --reference  envelope.price_moved  the shopper's authority
+python make.py toctou --budget 250000              policy.step_up        the merchant's band
+python make.py toctou --budget 250000 --reference  envelope.price_moved  the shopper's authority
 ```
 
 Both stop the money. Only the second stops it for a reason the shopper chose — a merchant
@@ -698,7 +699,7 @@ and no arrangement of hashes changes that.
 — real, expensive, and rare. Two other attacks land *every single time*, need no model to be
 fooled at all, and are the ones a merchant is most likely to meet in ordinary traffic.
 
-`make modelfree` scores them: no model, no keys, no network, every row deterministic, with
+`python make.py modelfree` scores them: no model, no keys, no network, every row deterministic, with
 `RESULTS.md` and `haat/out/modelfree.jsonl` committed beside it.
 
 | Family | none | prompt hardening | **PayNaka** | judge |
@@ -808,7 +809,7 @@ approved it" is not an audit trail; which human is.
 ## What the checkpoint costs
 
 A defence nobody will deploy is not a defence, and "we have not measured what it adds to
-the money path" is a reason not to deploy. `make latency` — no model, no keys, no network:
+the money path" is a reason not to deploy. `python make.py latency` — no model, no keys, no network:
 
 | Layer | p50 | p95 | **p99** | worst |
 | --- | ---: | ---: | ---: | ---: |
@@ -838,7 +839,7 @@ purpose: a checkpoint that looks cheap only next to a slow network is not a resu
 
 An agent does not need an adversary to lose a merchant money. It needs a duplicate webhook.
 
-`make chaos` runs six of them. No model, no keys, no network, reproducible to the paise:
+`python make.py chaos` runs six of them. No model, no keys, no network, reproducible to the paise:
 redelivery across two workers, redelivery across a deploy, a refund arriving before its
 capture, a redelivery whose amount was altered in flight, and a refund that succeeded while
 the response was lost.
@@ -1010,14 +1011,14 @@ Every term this README uses that is not ordinary English, in the order you meet 
 
 | Artifact | What it is |
 | -------- | -------- |
-| [RESULTS.md](RESULTS.md) · [RESULTS.json](RESULTS.json) | the four-defence comparison, generated by `make modelfree` |
+| [RESULTS.md](RESULTS.md) · [RESULTS.json](RESULTS.json) | the four-defence comparison, generated by `python make.py modelfree` |
 | [haat/out/modelfree.jsonl](haat/out/modelfree.jsonl) | every row behind that table, one JSON object each |
 | [var/evidence/](var/evidence/) | raw Razorpay test-mode responses: the order, the capture, the refund, and the two refusals that never reached the API |
-| `var/fixtures/audit-intact.db` · `audit-tampered.db` | one chain that verifies and one with a denial rewritten as an approval. `make audit-verify` runs both |
+| `var/fixtures/audit-intact.db` · `audit-tampered.db` | one chain that verifies and one with a denial rewritten as an approval. `python make.py audit-verify` runs both |
 
 ## The console
 
-`make dev` brings up the merchant on :8001, PayNaka on :8002 and the console on :5173.
+`python make.py dev` brings up the merchant on :8001, PayNaka on :8002 and the console on :5173.
 
 It is built on [`@razorpay/blade`](https://github.com/razorpay/blade), Razorpay's own
 MIT-licensed design system, the one that powers razorpay.com. So it does not merely
@@ -1028,8 +1029,8 @@ and an honest empty state where the injection sweep would go), **Replay** (the a
 chain, with a button that rehashes it), and **Policy** (the envelope, and Indian payments
 regulation with its sources named).
 
-`make console-data` writes the Benchmark screen's data with no keys and no network, and
-`make dev` runs it first, so the screen is never empty by accident. The committed JSON is
+`python make.py console-data` writes the Benchmark screen's data with no keys and no network, and
+`python make.py dev` runs it first, so the screen is never empty by accident. The committed JSON is
 checked against a fresh run by the test suite, because committed evidence that nothing
 verifies is worse than none.
 
@@ -1068,8 +1069,8 @@ Every defect below was found by this suite and is now pinned as a named regressi
 | adversarial | a non-ASCII byte in the `Authorization` header was an unhandled `TypeError` on the auth path — a 500 where a 401 belongs, reachable before any credential is known |
 
 ```bash
-make check                          # ruff, mypy --strict, pytest, gitleaks
-make test-adv                       # the adversarial suite on its own
+python make.py check                          # ruff, mypy --strict, pytest, gitleaks
+python make.py test-adv                       # the adversarial suite on its own
 HYPOTHESIS_PROFILE=thorough pytest  # 5,000 examples per property
 ```
 

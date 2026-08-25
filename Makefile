@@ -47,9 +47,7 @@ cov: ## tests with coverage report
 
 .PHONY: secrets
 secrets: ## scan working tree and full history for leaked credentials
-	@command -v gitleaks >/dev/null 2>&1 \
-	  && gitleaks detect --no-banner --redact -v \
-	  || echo "gitleaks not installed - see docs/SECURITY.md"
+	@$(PY) python -m scripts.secret_scan
 
 .PHONY: check
 check: lint types test secrets ## everything CI runs
