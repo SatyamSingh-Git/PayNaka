@@ -50,7 +50,7 @@ jobs:
         run: uv run pytest -m adversarial
 
   console:
-    name: console typecheck + build
+    name: console typecheck + test + build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -69,6 +69,12 @@ jobs:
       - run: npm ci
 
       - run: npm run typecheck
+
+      # Mounts every screen against the committed fixture data. It exists because a render
+      # crash is invisible to both checks around it: `Amount` was given a size that only
+      # exists on a variant it was not using, tsc passed on a structural union match, the
+      # build passed, and the page came up blank. This is the check that fails on that.
+      - run: npm test
 
       - run: npm run build
 

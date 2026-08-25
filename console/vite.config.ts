@@ -13,6 +13,21 @@ export default defineConfig({
       '/mcp': { target: 'http://127.0.0.1:8002', changeOrigin: true },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // One 1 MB chunk meant every visitor downloaded the design system, the animation
+        // library and the app before anything appeared. Splitting on the boundaries that
+        // actually differ in cache lifetime: Blade and React change when we upgrade them,
+        // our own code changes every commit.
+        manualChunks: {
+          react: ['react', 'react-dom', 'styled-components'],
+          blade: ['@razorpay/blade/components', '@razorpay/blade/tokens'],
+          motion: ['framer-motion'],
+        },
+      },
+    },
+  },
   resolve: {
     // Blade ships one package for web and native. Without this, bundling can pick a
     // .native entrypoint and fail on a react-native import that has no business here.

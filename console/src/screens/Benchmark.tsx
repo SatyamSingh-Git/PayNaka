@@ -18,6 +18,9 @@ import {
   TableHeaderRow,
   TableRow,
   Text,
+  Tooltip,
+  TooltipInteractiveWrapper,
+  InfoIcon,
 } from "@razorpay/blade/components";
 import { PageHeader } from "../ui";
 
@@ -211,6 +214,26 @@ export function Benchmark(): JSX.Element {
   );
 }
 
+/**
+ * A row label whose reasoning is one hover away rather than always on screen.
+ *
+ * Each of these tables carried a paragraph of explanation inside every cell. The reasoning
+ * is worth having -- it is why the number means anything -- but printed inline it buried
+ * the numbers it was explaining, and a reader skimming on a projector saw a wall of grey.
+ */
+function Why({ label, why }: { label: string; why: string }): JSX.Element {
+  return (
+    <Tooltip content={why} placement="right">
+      <TooltipInteractiveWrapper>
+        <Box display="flex" alignItems="center" gap="spacing.2">
+          <Text weight="semibold">{label}</Text>
+          <InfoIcon size="small" color="surface.icon.gray.muted" />
+        </Box>
+      </TooltipInteractiveWrapper>
+    </Tooltip>
+  );
+}
+
 // ==================================================================== toctou
 
 function TocTouSection({ results }: { results: TocTouResults }): JSX.Element {
@@ -270,12 +293,7 @@ function TocTouSection({ results }: { results: TocTouResults }): JSX.Element {
                   {tableData.map((row) => (
                     <TableRow key={row.id} item={row}>
                       <TableCell>
-                        <Box display="flex" flexDirection="column">
-                          <Text weight="semibold">{row.label}</Text>
-                          <Text size="small" color="surface.text.gray.muted">
-                            {row.why}
-                          </Text>
-                        </Box>
+                        <Why label={row.label} why={row.why} />
                       </TableCell>
                       <TableCell>{inr(row.charged)}</TableCell>
                       <TableCell>
@@ -378,12 +396,7 @@ function ChaosSection({ results }: { results: ChaosResults }): JSX.Element {
                   {tableData.map((row) => (
                     <TableRow key={row.id} item={row}>
                       <TableCell>
-                        <Box display="flex" flexDirection="column">
-                          <Text weight="semibold">{row.title}</Text>
-                          <Text size="small" color="surface.text.gray.muted">
-                            {row.hazard}
-                          </Text>
-                        </Box>
+                        <Why label={row.title} why={row.hazard} />
                       </TableCell>
                       <TableCell>
                         <Badge
