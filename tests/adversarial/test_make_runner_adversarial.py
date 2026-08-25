@@ -25,7 +25,16 @@ from functools import partial
 from pathlib import Path
 
 import pytest
-from make import MAKEFILE, SLOW_SECONDS, format_seconds, heartbeat, parse, run
+from make import (
+    HEARTBEAT_CAP_SECONDS,
+    MAKEFILE,
+    SLOW_SECONDS,
+    format_seconds,
+    heartbeat,
+    parse,
+    run,
+    tick_gaps,
+)
 
 pytestmark = pytest.mark.adversarial
 
@@ -142,3 +151,43 @@ class TestTheTimingLine:
     def test_it_never_raises_on_an_odd_duration(self, seconds: float) -> None:
         """A clock that steps backwards across a suspend must not take the runner down."""
         assert isinstance(format_seconds(seconds), str)
+
+
+class TestTheHeartbeatBacksOff:
+    """A fixed interval put seven ticks through the middle of pytest's dot stream in one
+    run -- noise beside output that was already proving the command was alive. The runner
+    cannot portably see what a child writes to the terminal, so it cannot tell a silent
+    command from a talkative one. It says its piece early and then quiets down.
+    """
+
+    def test_the_gaps_double_up_to_the_cap(self) -> None:
+        gaps = [gap for gap, _ in zip(tick_gaps(15.0, 60.0), range(6), strict=False)]
+        assert gaps == [15.0, 30.0, 60.0, 60.0, 60.0, 60.0]
+
+    def test_the_first_minute_is_still_reported_densely(self) -> None:
+        """Where the backoff must not cost anything: mypy's cold cache is about a minute,
+        and a reader watching a blank terminal needs an answer inside it."""
+        elapsed, ticks = 0.0, 0
+        for gap in tick_gaps():
+            elapsed += gap
+            if elapsed > 60.0:
+                break
+            ticks += 1
+        assert ticks >= 2, "a silent first minute would go unexplained"
+
+    def test_a_long_command_keeps_reporting_forever(self) -> None:
+        """Backing off is not giving up. A model sweep runs for an hour and must still
+        show a pulse."""
+        total = sum(gap for gap, _ in zip(tick_gaps(), range(200), strict=False))
+        assert total > 3600.0
+
+    @pytest.mark.parametrize("cap", [0.0, 1.0, HEARTBEAT_CAP_SECONDS])
+    def test_the_cap_is_never_exceeded(self, cap: float) -> None:
+        gaps = [gap for gap, _ in zip(tick_gaps(0.5, cap), range(30), strict=False)]
+        assert max(gaps) <= max(0.5, cap)
+
+    def test_it_still_ticks_more_than_once(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """End to end, against the real thread: backing off must not silence it after one."""
+        with heartbeat(enabled=True, interval=0.01):
+            time.sleep(0.2)
+        assert capsys.readouterr().err.count("still running") >= 2

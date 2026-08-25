@@ -30,16 +30,23 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 MAKEFILE = Path(__file__).with_name("Makefile")
 
-#: How often to say a silent command is still running. Long enough that nothing short
-#: ever prints a tick, short enough to answer "is this frozen" before a reader gives up.
+#: How long to wait before saying a command is still running. Long enough that nothing
+#: short ever prints a tick, short enough to answer "is this frozen" before a reader
+#: gives up on it.
 HEARTBEAT_SECONDS = 15.0
+
+#: The gap doubles after each tick, up to this. The question a tick answers -- *is this
+#: stuck* -- is asked hardest in the first minute and barely at all after that, and a
+#: command that prints its own progress (pytest's dots) needs no help from us at all. The
+#: runner cannot portably tell those apart, so it says its piece and then goes quiet.
+HEARTBEAT_CAP_SECONDS = 60.0
 
 #: Commands quicker than this finish before anyone wonders, and their timing is noise.
 SLOW_SECONDS = 5.0
@@ -129,6 +136,20 @@ def format_seconds(seconds: float) -> str:
     return f"{minutes}m{rest:02d}s"
 
 
+def tick_gaps(
+    first: float = HEARTBEAT_SECONDS, cap: float = HEARTBEAT_CAP_SECONDS
+) -> Iterator[float]:
+    """How long to wait before each successive tick: `first`, then doubling up to `cap`.
+
+    A separate generator because the alternative is a test that waits real seconds to prove
+    a backoff, and because the sequence is the whole of the behaviour worth arguing about.
+    """
+    gap = first
+    while True:
+        yield gap
+        gap = min(gap * 2, cap)
+
+
 @contextmanager
 def heartbeat(*, enabled: bool, interval: float = HEARTBEAT_SECONDS) -> Generator[None]:
     """Say the command is still alive, while it is saying nothing itself.
@@ -139,8 +160,14 @@ def heartbeat(*, enabled: bool, interval: float = HEARTBEAT_SECONDS) -> Generato
     and reading it as a hang is the correct reading of the evidence they were given.
 
     Ticks go to stderr, and only when stderr is a terminal: a redirected log gets the
-    commands and their output and none of this, and a reader watching the screen gets a
-    line every fifteen seconds telling them the wait is the tool's, not the runner's.
+    commands and their output and none of this.
+
+    The gap doubles after each tick, because a command that talks for itself needs no help
+    and the runner cannot tell which one it is holding. `pytest` prints a dot per test, and
+    a fixed fifteen-second tick landed in the middle of that stream seven times in one run
+    -- noise beside output that was already proving it was alive. Backing off leaves the
+    first minute densely reported, which is when "is this stuck" is actually being asked,
+    and quiets down afterwards.
 
     A daemon thread woken by an `Event` rather than a sleep loop, so it stops the moment
     the command returns instead of up to `interval` later -- including when the command
@@ -154,7 +181,9 @@ def heartbeat(*, enabled: bool, interval: float = HEARTBEAT_SECONDS) -> Generato
     started = time.monotonic()
 
     def tick() -> None:
-        while not stop.wait(interval):
+        for gap in tick_gaps(interval):
+            if stop.wait(gap):
+                return
             waited = format_seconds(time.monotonic() - started)
             print(f"  ... still running ({waited})", file=sys.stderr, flush=True)
 
