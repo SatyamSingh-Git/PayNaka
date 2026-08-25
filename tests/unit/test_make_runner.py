@@ -16,12 +16,34 @@ next to the first.
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
-from make import MAKEFILE, expand, parse
+from make import MAKEFILE, expand, format_seconds, heartbeat, parse
 
 MAKEFILE_TEXT = MAKEFILE.read_text(encoding="utf-8")
+
+
+def _run_makefile(tmp_path: Path, text: str, task: str = "") -> str:
+    """Drive the real `make.py` as a subprocess, over a Makefile written for the test.
+
+    A subprocess and not an in-process call, because the thing under test here is what
+    reaches a terminal and in what order -- which is a property of the process's stdout,
+    not of the functions.
+    """
+    makefile = tmp_path / "Makefile"
+    makefile.write_text(text, encoding="utf-8")
+    name = task or text.split(":", 1)[0]
+    completed = subprocess.run(
+        [sys.executable, str(MAKEFILE.with_name("make.py")), "--file", str(makefile), name],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.stdout
 
 
 @pytest.fixture(scope="module")
@@ -236,3 +258,65 @@ class TestTheEnvInstructionCannotDestroyKeys:
         source = Path(make_env.__file__).read_text(encoding="utf-8")
         assert "if TARGET.exists()" in source
         assert "Leaving it exactly as it is" in source
+
+
+class TestItSaysSomethingWhileItWorks:
+    """A reader ran `check`, watched `$ uv run mypy ...` sit there for eighty seconds, and
+    reported the runner as hung. It was not: mypy prints one line, at the end, and on the
+    cold cache a fresh clone has, that end is a long way off. Measured here: 1m19s cold
+    against 4.3s warm.
+
+    Reading that as a hang is the correct reading of the evidence a silent terminal gives.
+    The fix is evidence, not reassurance -- a tick while it waits, and the elapsed time
+    when it lands.
+    """
+
+    @pytest.mark.parametrize(
+        ("seconds", "expected"),
+        [
+            (0.0, "0.0s"),
+            (4.32, "4.3s"),
+            (59.94, "59.9s"),
+            (60.0, "1m00s"),
+            (79.04, "1m19s"),
+            (3599.0, "59m59s"),
+            (3600.0, "60m00s"),
+        ],
+    )
+    def test_elapsed_time_reads_the_way_a_person_would_say_it(
+        self, seconds: float, expected: str
+    ) -> None:
+        assert format_seconds(seconds) == expected
+
+    def test_a_fast_command_reports_no_timing_at_all(self, tmp_path: Path) -> None:
+        """Timing every `echo` would bury the two numbers that matter in forty that do not."""
+        out = _run_makefile(tmp_path, "quick: ## x\n\techo hi\n")
+        assert "hi" in out
+        assert "s\n" not in out.replace("$ echo hi\n", "")
+
+    def test_the_heartbeat_stays_silent_when_nobody_is_watching(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Disabled means no thread and no output -- a redirected log gets the commands and
+        their output, and none of this."""
+        with heartbeat(enabled=False, interval=0.01):
+            time.sleep(0.05)
+        assert capsys.readouterr().err == ""
+
+    def test_the_heartbeat_ticks_while_a_command_is_silent(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with heartbeat(enabled=True, interval=0.02):
+            time.sleep(0.12)
+        err = capsys.readouterr().err
+        assert "still running" in err
+        assert err.count("still running") >= 2, err
+
+    def test_it_stops_when_the_command_does(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A tick arriving after the command finished would land on top of the next one's
+        output, or on top of an error message."""
+        with heartbeat(enabled=True, interval=0.02):
+            time.sleep(0.05)
+        capsys.readouterr()
+        time.sleep(0.15)
+        assert capsys.readouterr().err == "", "the heartbeat outlived the command"

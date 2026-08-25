@@ -28,10 +28,21 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 MAKEFILE = Path(__file__).with_name("Makefile")
+
+#: How often to say a silent command is still running. Long enough that nothing short
+#: ever prints a tick, short enough to answer "is this frozen" before a reader gives up.
+HEARTBEAT_SECONDS = 15.0
+
+#: Commands quicker than this finish before anyone wonders, and their timing is noise.
+SLOW_SECONDS = 5.0
 
 #: `SHELL := /bin/bash` and friends. Assignment forms this Makefile actually uses.
 _ASSIGN = re.compile(r"^(\w+)\s*:?=\s*(.*)$")
@@ -110,6 +121,52 @@ def expand(line: str, variables: dict[str, str]) -> str:
     return line
 
 
+def format_seconds(seconds: float) -> str:
+    """`4.3s`, `1m19s`. Short enough to sit at the end of a line without explaining itself."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, rest = divmod(int(seconds), 60)
+    return f"{minutes}m{rest:02d}s"
+
+
+@contextmanager
+def heartbeat(*, enabled: bool, interval: float = HEARTBEAT_SECONDS) -> Generator[None]:
+    """Say the command is still alive, while it is saying nothing itself.
+
+    `mypy` prints one line, at the end. On a warm cache that is four seconds and nobody
+    notices; on the cold cache a reviewer has after cloning, it is eighty seconds of an
+    apparently frozen terminal after the echoed command. A reader reported exactly that,
+    and reading it as a hang is the correct reading of the evidence they were given.
+
+    Ticks go to stderr, and only when stderr is a terminal: a redirected log gets the
+    commands and their output and none of this, and a reader watching the screen gets a
+    line every fifteen seconds telling them the wait is the tool's, not the runner's.
+
+    A daemon thread woken by an `Event` rather than a sleep loop, so it stops the moment
+    the command returns instead of up to `interval` later -- including when the command
+    fails, which is when a stray thread printing over the error would be least welcome.
+    """
+    if not enabled:
+        yield
+        return
+
+    stop = threading.Event()
+    started = time.monotonic()
+
+    def tick() -> None:
+        while not stop.wait(interval):
+            waited = format_seconds(time.monotonic() - started)
+            print(f"  ... still running ({waited})", file=sys.stderr, flush=True)
+
+    thread = threading.Thread(target=tick, daemon=True, name="make.py-heartbeat")
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=1.0)
+
+
 def run(name: str, tasks: dict[str, Task], variables: dict[str, str], seen: set[str]) -> int:
     """Run one task and everything it depends on, once each."""
     if name in seen:
@@ -142,13 +199,27 @@ def run(name: str, tasks: dict[str, Task], variables: dict[str, str], seen: set[
         if not command:
             continue
 
+        # `flush` is not cosmetic. Python block-buffers stdout when it is a pipe, while the
+        # child process writes to that pipe directly -- so in any redirected log, every
+        # echoed command came out *after* the output it introduced, and a failure appeared
+        # underneath the wrong task. On a terminal it looked fine, which is why it survived.
         if not quiet:
-            print(f"$ {command}")
+            print(f"$ {command}", flush=True)
 
         # Through a shell, because the recipes use `&&`, `||` and pipes. On Windows that is
         # cmd.exe, which handles those three the same way -- the recipes here stay inside
         # that intersection deliberately.
-        completed = subprocess.run(command, shell=True, check=False)  # noqa: S602
+        started = time.monotonic()
+        with heartbeat(enabled=sys.stderr.isatty()):
+            completed = subprocess.run(command, shell=True, check=False)  # noqa: S602
+        waited = time.monotonic() - started
+
+        # Only for commands slow enough that somebody wondered. It is also the answer to
+        # "why was that so long": a cold mypy cache is eighty seconds and a warm one four,
+        # and seeing both numbers once is what makes the second run unsurprising.
+        if waited >= SLOW_SECONDS and not quiet:
+            print(f"  {format_seconds(waited)}", flush=True)
+
         if completed.returncode != 0 and not keep_going:
             print(
                 f"make.py: task {name!r} failed (exit {completed.returncode})",
@@ -174,13 +245,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("tasks", nargs="*", help="task names, in order. Default: help")
     parser.add_argument("--list", action="store_true", help="list every task and exit")
+    # Exists so the runner can be tested against a Makefile written for the test, rather
+    # than against this project's real one -- which would make every test of the runner
+    # also a test of ruff, mypy and the network they might reach.
+    parser.add_argument(
+        "--file", type=Path, default=MAKEFILE, help=argparse.SUPPRESS, dest="makefile"
+    )
     args = parser.parse_args(argv)
 
-    if not MAKEFILE.exists():
-        print(f"make.py: no Makefile beside {__file__}", file=sys.stderr)
+    if not args.makefile.exists():
+        print(f"make.py: no Makefile at {args.makefile}", file=sys.stderr)
         return 2
 
-    tasks, variables = parse()
+    tasks, variables = parse(args.makefile)
 
     if args.list or not args.tasks:
         show(tasks)

@@ -167,6 +167,13 @@ is a task name, and `make` is not installed on a default Windows box — so that
 spelling used throughout. [`make.py`](make.py) *reads* the Makefile rather than copying it,
 so the two cannot drift apart.
 
+**Give `check` about two minutes on a fresh clone**, and about ninety seconds after that.
+Most of the difference is `mypy` building its cache from nothing — around a minute cold
+against four seconds warm — and it prints not one character until it has finished. That
+silence has been read as a hang, reasonably. So the runner ticks every fifteen seconds
+while a command is quiet, and prints the elapsed time for anything slower than five
+seconds; you should be able to tell waiting from stuck without guessing.
+
 If you already have `make`, `make check` does the same thing. On PowerShell, `.\make check`
 also works — there is a shim in the repository root.
 
