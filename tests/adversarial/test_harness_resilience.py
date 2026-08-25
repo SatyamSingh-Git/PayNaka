@@ -344,3 +344,45 @@ class TestOneModelsResultsAreNotAnothersEvidence:
         path.write_text(row_m("a", "model-x", error="429") + "\n", encoding="utf-8")
         assert _completed(path, "model-x") == set()
         assert _completed(path, "model-y") == set()
+
+
+class TestAModelCallCannotHangForever:
+    """The failure that looks exactly like a working sweep, and then is not one.
+
+    Three paid sweeps were launched in parallel. They wrote six, nine and zero rows and then
+    stopped dead -- no error, no exit, three live processes producing nothing for ten
+    minutes. The cause was not the provider: the OpenAI SDK defaults to a **600 second**
+    request timeout, and these calls run behind a thread pool, so one provider that accepts
+    a request and goes quiet parks a worker for ten minutes. Six workers park the sweep.
+
+    The retry logic could not help, because retries only run once a call *returns*. A hung
+    call never returns, so backoff never fires and the transient/permanent split never gets
+    asked. An unbounded timeout does not degrade a benchmark, it silently stops it.
+    """
+
+    def test_the_client_sets_an_explicit_timeout(self) -> None:
+        from buyer.brains import REQUEST_TIMEOUT_SECONDS
+
+        assert 0 < REQUEST_TIMEOUT_SECONDS <= 180, (
+            "a timeout long enough to be indistinguishable from a hang is not a timeout"
+        )
+
+    def test_the_timeout_is_passed_to_the_client(self) -> None:
+        """Asserted on the source, because constructing the client needs a key and the
+        thing under test is that the argument is present at all."""
+        import inspect
+
+        from buyer import brains
+
+        source = inspect.getsource(brains.OpenRouterBrain)
+        assert "timeout=REQUEST_TIMEOUT_SECONDS" in source
+        # The SDK would otherwise retry underneath our own retry loop, multiplying the two
+        # and hiding which layer was struggling.
+        assert "max_retries=0" in source
+
+    def test_a_timeout_is_treated_as_transient(self) -> None:
+        """It has to be retryable, or the fix converts a hang into a permanent failure."""
+        from buyer.brains import _transient
+
+        assert _transient(TimeoutError("request timed out")) is True
+        assert _transient(Exception("Request timeout after 90s")) is True

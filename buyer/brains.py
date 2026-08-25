@@ -33,7 +33,7 @@ import random
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Final, Literal, Protocol
 
 __all__ = [
     "Brain",
@@ -159,6 +159,11 @@ DEFAULT_PINS: dict[str, tuple[list[str], list[str] | None]] = {
 }
 
 
+#: How long to wait on one model call before treating it as lost. The SDK defaults to
+#: 600s, which is indistinguishable from a hang when calls run behind a thread pool.
+REQUEST_TIMEOUT_SECONDS: Final[float] = 90.0
+
+
 @dataclass
 class OpenRouterBrain:
     """Any OpenAI-compatible model, through OpenRouter, with the provider pinned."""
@@ -191,6 +196,20 @@ class OpenRouterBrain:
             self._client = OpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=key,
+                # Explicit, because the SDK's default is 600 seconds and this runs behind a
+                # thread pool. A provider that accepts a request and then goes quiet parks a
+                # worker for ten minutes; six workers park the whole sweep, and it looks
+                # exactly like a hang rather than a slow call -- measured, on three parallel
+                # sweeps that wrote six rows and then stopped dead.
+                #
+                # A multi-turn agent call over ~6k input tokens finishes well inside this.
+                # Anything past it is not slow, it is gone, and the retry above can only
+                # help once the call actually returns.
+                timeout=REQUEST_TIMEOUT_SECONDS,
+                # One attempt per call. Retries are handled above with jittered backoff and
+                # a transient/permanent split; letting the SDK also retry would multiply the
+                # two together and hide which layer was struggling.
+                max_retries=0,
                 default_headers={
                     "HTTP-Referer": "https://github.com/SatyamSingh-Git/PayNaka",
                     "X-Title": "PayNaka / HAAT",
