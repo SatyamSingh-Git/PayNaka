@@ -95,11 +95,11 @@ estimate: ## measure what a full sweep would cost, no API calls
 	$(PY) python -m scripts.estimate_cost
 
 .PHONY: bench
-bench: ## visible corpus, four defences -> RESULTS.md
+bench: ## COSTS MONEY: ~1,800 real model calls, about $1. Asks before spending.
 	$(PY) python -m haat.runner --corpus visible --defences all
 
 .PHONY: bench-sealed
-bench-sealed: ## held-out families. refuses to run before the freeze tag.
+bench-sealed: ## COSTS MONEY: held-out families. Refuses before the freeze tag; asks first.
 	@git rev-parse v1.0-freeze >/dev/null 2>&1 \
 	  || { echo "REFUSED: tag v1.0-freeze does not exist. Sealed corpus stays sealed."; exit 1; }
 	$(PY) python -m haat.runner --corpus sealed --defences all

@@ -214,8 +214,14 @@ These reach the network:
 python make.py env            # creates .env from the template, never overwrites one
 python make.py razorpay-lifecycle       # a REAL test-mode order, through the gate → var/evidence/
 python make.py toctou-probe             # cents: do real agents notice the price changed?
-python make.py bench                    # the injection corpus against four defences (needs a model key)
+python make.py bench                    # COSTS MONEY: ~1,800 real model calls, about $1
 ```
+
+Only `bench` and `bench-sealed` spend a meaningful amount, and both print the model, the
+number of calls and the estimated cost and then wait for you to type `yes` — nothing is
+spent before you answer. Ctrl+C is safe at any point: finished runs are written as they
+complete, and re-running resumes from them rather than paying twice. `python make.py
+estimate` prices a sweep without making a single call.
 
 Works fully offline: `PAYNAKA_RAIL=sim` runs a deterministic in-process payment simulator, so the
 test suite and every demonstration above need no credentials. Set `PAYNAKA_RAIL=test` to drive the

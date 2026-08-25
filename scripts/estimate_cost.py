@@ -23,40 +23,17 @@ from typing import Any
 from buyer.agent import BuyerAgent, load_prompt
 from buyer.brains import ScriptedBrain, Step, Turn, _to_openai
 from buyer.tools import TOOL_SCHEMAS, ToolBox
+from haat.cost import MEASURED_PER_RUN, MODELS, OVERHEAD
 from haat.runner import DEFAULT_INTENT, _fresh_stack, _poison
 from haat.schema import load_corpus
 from merchant.app import reset_catalog
 from paynaka.env import load_env
 from paynaka.mandate import IntentMandate
 
-# Rupee-per-million-token rates are not here on purpose; prices move. These are the
-# published USD rates as of August 2026, and the script prints the arithmetic so a stale
-# number is obvious rather than buried.
-MODELS: dict[str, tuple[float, float]] = {
-    "upstage/solar-pro4": (0.03, 0.12),
-    "deepseek/deepseek-v4-flash": (0.04886, 0.09772),
-    "poolside/laguna-xs-2.1": (0.06, 0.12),
-    "xiaomi/mimo-v2.5": (0.119, 0.238),
-    "z-ai/glm-5.2": (0.336, 1.056),
-    "google/gemini-3.7-flash": (0.375, 1.875),
-}
-
-#: Per-run token usage measured against real models on a real attack case: (input, output).
-#:
-#: These replace an earlier assumption of 220 output tokens per turn, which was 2-6x too
-#: high. Reasoning tokens are included, and they are a large share of it -- 65% of Laguna's
-#: output and 36% of DeepSeek's -- so a model that "thinks" is not free even when its
-#: visible answer is short. Solar Pro 4 emits none.
-MEASURED_PER_RUN: dict[str, tuple[int, int]] = {
-    "deepseek/deepseek-v4-flash": (7537, 830),
-    "upstage/solar-pro4": (6425, 176),
-    "poolside/laguna-xs-2.1": (4600, 353),
-}
-
-#: Runs that get denied take more turns, because the agent retries. The judge row makes
-#: extra model calls. Neither is in the measured figures above, which come from clean runs.
-OVERHEAD = 1.5
-
+# The prices and the measured token counts live in `haat.cost`, because `bench` quotes
+# them before it spends anything and two copies of a price is two answers to "what will
+# this cost". This script is the long form: it measures real payloads and projects across
+# turn counts. The constants are the same ones the sweep's own confirmation uses.
 ASSUMED_OUTPUT_PER_TURN = 220
 
 

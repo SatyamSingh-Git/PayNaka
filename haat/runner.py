@@ -10,11 +10,18 @@ Runs are resumable. Each result is appended to JSONL as it completes, and a re-r
 what is already there -- a benchmark that loses four hours of work to one transient API
 error is a benchmark nobody runs twice.
 
+**A full sweep spends real money** -- 1,800 calls to a paid model for the visible corpus,
+about a dollar on the cheapest measured one. It prints the model, the call count and the
+estimate and waits for a typed `yes` before the first call. `--yes` skips the question for
+CI; with no terminal and no `--yes` it refuses, because an unattended sweep is exactly
+where a thousand unintended calls goes unnoticed.
+
 Usage
     python -m haat.runner --corpus visible --defences all
     python -m haat.runner --corpus sealed  --defences all     # refuses before the freeze
     python -m haat.runner --corpus visible --defences naka --limit 20
     python -m haat.runner --smoke                             # harness check, no API key
+    python -m haat.runner --corpus visible --yes              # unattended; spends without asking
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ from typing import Any, Final
 from buyer.agent import BuyerAgent, load_prompt
 from buyer.brains import Brain, ScriptedBrain, build_brain
 from buyer.tools import ToolBox
+from haat.cost import estimate_usd
 from haat.defences import DEFENCE_NAMES, build_defence
 from haat.freeze import freeze_tag_exists
 from haat.report import write_results
@@ -360,6 +368,79 @@ def _model_name(config: RunConfig) -> str:
     return config.model or _os.environ.get("PAYNAKA_BENCH_MODEL", "deepseek/deepseek-v4-flash")
 
 
+def _pending_runs(config: RunConfig) -> int:
+    """How many model calls this invocation would actually make.
+
+    Counted the same way `run_corpus` counts, resume included: quoting the full price of a
+    sweep that is 90% finished would frighten a reader off the cheap half of it.
+    """
+    jsonl = config.out_dir / f"{config.corpus}.jsonl"
+    already = _completed(jsonl, _model_name(config))
+    return sum(1 for job in _jobs(config) if (job[1].case_id, job[2]) not in already)
+
+
+def confirm_spend(config: RunConfig, *, assume_yes: bool, interactive: bool) -> bool:
+    """Say what this will cost and to whom, before the first call rather than after.
+
+    `bench` described itself as *"visible corpus, four defences -> RESULTS.md"* and then
+    made eighteen hundred calls to a paid model. A reader started it, watched the counter
+    reach 20/1800, and asked whether it was going to be expensive -- which is a question
+    that should never have to be asked from inside a running sweep.
+
+    Fails closed in the direction that matters: no terminal to ask and no `--yes` means
+    refuse, because a sweep launched by a script that nobody is watching is exactly the
+    case where an unintended thousand calls goes unnoticed.
+    """
+    if config.smoke:
+        return True
+
+    runs = _pending_runs(config)
+    if runs == 0:
+        return True
+
+    model = _model_name(config)
+    estimate = estimate_usd(model, runs)
+    priced = f"about ${estimate:,.2f}" if estimate is not None else "unknown for this model"
+
+    print()
+    print("This sweep calls a real model, and real models cost real money.")
+    print()
+    print(f"  model       {model}")
+    print(f"  corpus      {config.corpus}, defences: {', '.join(config.defences)}")
+    print(f"  model calls {runs:,}")
+    print(f"  estimate    {priced}")
+    if estimate is None:
+        print("              run `python make.py estimate` for a breakdown")
+    else:
+        print("              measured tokens x Aug 2026 list rates, +50% for retries")
+    print()
+    print("  Nothing is spent until you answer. Ctrl+C is safe at any point: finished")
+    print("  runs are written as they complete, and the next run resumes from them.")
+    print()
+
+    if assume_yes:
+        print("  --yes given; starting.")
+        return True
+
+    if not interactive:
+        print(
+            "REFUSED: no terminal to ask, and --yes was not given. A sweep nobody is "
+            "watching is the one that spends a thousand calls unnoticed.",
+            file=sys.stderr,
+        )
+        return False
+
+    try:
+        answer = input("Type yes to start: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    if answer != "yes":
+        print("nothing spent.")
+        return False
+    return True
+
+
 def run_corpus(config: RunConfig) -> list[RunResult]:
     config.out_dir.mkdir(parents=True, exist_ok=True)
     jsonl = config.out_dir / f"{config.corpus}.jsonl"
@@ -497,6 +578,11 @@ def main(argv: list[str] | None = None) -> int:
         help="model spec: an OpenRouter slug such as deepseek/deepseek-v4-flash, or "
         "anthropic:claude-opus-5. Defaults to PAYNAKA_BENCH_MODEL.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the cost confirmation. For CI and for a sweep you have already priced.",
+    )
     parser.add_argument("--out", type=Path, default=Path("haat/out"))
     parser.add_argument(
         "--smoke",
@@ -551,6 +637,9 @@ def main(argv: list[str] | None = None) -> int:
         kind=args.kind,
         retries=args.retries,
     )
+
+    if not confirm_spend(config, assume_yes=args.yes, interactive=sys.stdin.isatty()):
+        return 1
 
     started = time.perf_counter()
     try:
