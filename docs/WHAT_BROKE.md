@@ -539,9 +539,33 @@ the reason the console is built on Razorpay's own components instead of hand-for
 reader-facing references instead of changelogs. *"We need to score above 90 in each category"*
 set the bar that produced most of this document.
 
-**The calls that were judgment, not code.** Which models to spend real money on. Whether to
-publish a contested number or exclude it. Whether a benchmark result was worth the quota.
-Where to draw the line on scope with a deadline approaching. When to stop.
+**The calls that were judgment, not code.** Four worth showing with the reasoning attached,
+because a verdict without reasoning is indistinguishable from a guess.
+
+*Killing a number that would have flattered the project.* The with/without comparison table
+needed a "total, with PayNaka" figure, and the instruction was to write **zero** — on the
+grounds that we were confident the gate would not let those breaches through. The
+counter-argument was that confidence is not measurement, and that a zero we had not run is a
+zero we could not defend. The decision took one line: *"get it then — I'd rather not write
+that number."* **A flattering figure, proposed and then withdrawn on evidence.** That is the
+same instinct as the README's *What we refuse to claim*, applied against its author's own
+interest, and it is the single best thing in this document.
+
+*Deciding what counts as a subject.* The headline experiment excludes the free-tier model
+that returned 0 of 245 and reports only the three paid models. Not because the number was
+inconvenient — because one free-tier model is not a sample, and §3.6 exists precisely because
+we had once treated it as one. Choosing to narrow a claim after already publishing the wider
+one is expensive and correct.
+
+*Spending real money deliberately, and stopping.* Which three models to buy a full sweep from,
+and at what point a result stops being worth the quota. When a sweep was started without
+knowing its cost, the response was to stop it and ask — which is how the cost confirmation in
+`bench` exists at all.
+
+*Calibrating ambition against a deadline.* The target was set at "above 90 in every category"
+and revised, out loud, to *"push as much as we can; if we can't do it further, not a
+problem."* Knowing which of those two sentences a project needs, and when, is most of
+shipping.
 
 **Commissioning adversaries.** Bringing in independent audits — twice, on a project already
 passing 2,400 tests — and relaying findings without softening them. That is not a comfortable
