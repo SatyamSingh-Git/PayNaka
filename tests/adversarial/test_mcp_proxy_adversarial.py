@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from typing import Any, ClassVar
 
 import pytest
 
@@ -352,3 +353,74 @@ class TestAuditing:
     def test_every_call_is_recorded_for_the_console(self, bound: McpProxy) -> None:
         rpc(bound, "tools/call", {"name": "fetch_all_payments", "arguments": {}})
         assert bound.calls[-1]["tool"] == "fetch_all_payments"
+
+
+class TestAReplayIsNotARefusal:
+    """`executed` is False on a replay, deliberately -- it is what stops twenty webhook
+    redeliveries summing to twenty payments in the benchmark. The proxy folded that into
+    its failure branch and answered `blocked_by_paynaka` for a request that had already
+    succeeded.
+
+    That is the worst available answer. An agent reading it retries, or tells the shopper
+    their purchase failed while the money has moved. An audit reproduced it.
+    """
+
+    ARGUMENTS: ClassVar[dict[str, object]] = {
+        "amount": AUTHORISED,
+        "notes": {
+            "paynaka_items": [{"sku": "ATTA-5KG", "qty": 1, "unit_paise": AUTHORISED}],
+            "destination": "addr_home",
+            "idempotency_key": "replay_key",
+        },
+    }
+
+    def order(self, bound: McpProxy) -> dict[str, Any]:
+        return payload(
+            rpc(bound, "tools/call", {"name": "create_order", "arguments": self.ARGUMENTS})
+        )
+
+    def test_a_repeated_call_reports_already_done(self, bound: McpProxy) -> None:
+        first = self.order(bound)
+        assert first["status"] == "ok", first
+
+        second = self.order(bound)
+        assert second["status"] == "already_done", second
+        assert second["replayed"] is True
+
+    def test_it_does_not_claim_paynaka_refused_anything(self, bound: McpProxy) -> None:
+        self.order(bound)
+        second = self.order(bound)
+        assert second["status"] != "blocked_by_paynaka"
+        assert "check" not in second, "a replay has no check that refused it"
+
+    def test_the_original_outcome_comes_back(self, bound: McpProxy) -> None:
+        """Not just a label. A caller that lost its first response needs the order id,
+        which is the entire reason it retried."""
+        first = self.order(bound)
+        second = self.order(bound)
+        assert second.get("order_id") == first.get("order_id")
+        assert second["order_id"]
+
+    def test_a_real_refusal_still_says_blocked(self, bound: McpProxy) -> None:
+        """The other direction, and the one that would matter if this were wrong: a
+        genuine denial must not be dressed up as a completed purchase."""
+        refused = payload(
+            rpc(
+                bound,
+                "tools/call",
+                {
+                    "name": "create_order",
+                    "arguments": {
+                        "amount": ATTACK,
+                        "notes": {
+                            "paynaka_items": [
+                                {"sku": "GIFT-50K", "qty": 1, "unit_paise": ATTACK},
+                            ],
+                            "destination": "addr_home",
+                        },
+                    },
+                },
+            )
+        )
+        assert refused["status"] == "blocked_by_paynaka"
+        assert refused["check"]

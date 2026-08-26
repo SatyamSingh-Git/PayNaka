@@ -24,7 +24,7 @@ transport mock, and there is no dependency whose next release quietly changes th
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Final
 
 from paynaka.engine import ExecutionResult, PayNaka
@@ -402,6 +402,35 @@ def _render(result: ExecutionResult) -> dict[str, Any]:
         if rail is not None and hasattr(rail, "status"):
             payload["rail_status"] = rail.status
         return payload
+
+    # A replay of a request that already succeeded is not a refusal, and calling it one is
+    # the worst available answer: an agent reading `blocked_by_paynaka` retries, or tells
+    # the shopper their purchase failed when the money has moved.
+    #
+    # `executed` stays False on a replay deliberately -- it is what stops twenty webhook
+    # redeliveries summing to twenty payments in the benchmark -- so the replay has to be
+    # recognised here rather than folded into the success branch above.
+    if result.decision.replayed and result.original_result is not None:
+        original = asdict(result.original_result)
+        return {
+            "status": "already_done",
+            "replayed": True,
+            "audit_seq": result.audit_seq,
+            "hint": (
+                "This exact request was already completed under the same idempotency key. "
+                "It was not repeated and it was not refused; the original outcome is below."
+            ),
+            # `status` is excluded for the same reason the success branch above excludes
+            # it: PayNaka's own status lives there, and letting the rail's ("created")
+            # overwrite it would answer "created" to a caller asking whether this was a
+            # replay. It comes back as `rail_status` instead.
+            "rail_status": original.get("status"),
+            **{
+                key: value
+                for key, value in original.items()
+                if value is not None and key != "status"
+            },
+        }
 
     return {
         "status": "blocked_by_paynaka",
