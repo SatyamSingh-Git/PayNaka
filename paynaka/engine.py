@@ -33,6 +33,7 @@ from paynaka.anchor import AnchorLog, Notary, rail_note
 from paynaka.audit import GENESIS, AuditChain, AuditRecord
 from paynaka.clock import Clock, SystemClock
 from paynaka.gate import (
+    SPENDING_ACTIONS,
     GateDecision,
     MoneyRequest,
     Verdict,
@@ -377,9 +378,17 @@ class PayNaka:
         try:
             result = self._dispatch(request, mandate, key)
         except RailDeclined as exc:
-            # Definitive: the rail says it did not and will not. The claim the gate took
-            # on the refundable balance goes back, so the next request can use it.
+            # Definitive: the rail says it did not and will not. Both claims the gate took
+            # go back, so the next request can use them.
+            #
+            # The mandate claim used to stay. A merchant's decline therefore destroyed that
+            # much of the shopper's authority permanently -- a shopper who authorised
+            # Rs 1,999 and met one declining card had a mandate worth nothing afterwards,
+            # with no money having moved and nothing anywhere explaining it. Only on a
+            # *definitive* refusal: a timeout falls to the branch below, where the outcome
+            # is unknown and the claim is deliberately kept.
             self._release(request)
+            self._release_authority(request, mandate)
             self._append("rail.declined", request, str(exc), provenance)
             return ExecutionResult(
                 decision=decision,
@@ -702,6 +711,12 @@ class PayNaka:
                 confirmed,
                 clock=self.clock,
             )
+
+    def _release_authority(self, request: MoneyRequest, mandate: IntentMandate) -> None:
+        """Give back the slice of the mandate's budget this request had claimed."""
+        if request.action not in SPENDING_ACTIONS:
+            return
+        self.state.release_mandate_spend(mandate.mandate_id, reservation_key(request))
 
     def _release(self, request: MoneyRequest) -> None:
         """Hand a refund's balance claim back. Only on a refusal the rail stands behind."""

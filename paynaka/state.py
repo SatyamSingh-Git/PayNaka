@@ -593,6 +593,31 @@ class SqliteState:
             )
             return cursor.rowcount == 1
 
+    def release_mandate_spend(self, mandate_id: str, key: str) -> bool:
+        """Hand a mandate claim back. ``True`` if a claim was there to release.
+
+        Only for a *definitive* refusal -- the rail saying it did not and will not. The
+        claim is taken before the rail is called, because it has to be, and without this
+        it was never given back: a merchant's decline permanently destroyed that much of
+        the shopper's authority. A shopper who authorised Rs 1,999 and hit one declining
+        card had a mandate worth nothing afterwards, with no money having moved and nothing
+        anywhere explaining it.
+
+        Deliberately *not* called on a timeout. There the outcome is unknown, the money may
+        have moved, and releasing would let a retry spend authority that is already gone.
+        Same rule as the refundable-balance claim beside it, and the same reasoning: the
+        conservative direction on a money path is to keep it held until reconciliation
+        resolves it.
+        """
+        if not mandate_id or not key:
+            raise StateError("releasing a mandate claim needs a mandate and a key")
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM mandate_spend WHERE mandate_id = ? AND key = ?",
+                (mandate_id, key),
+            )
+            return cursor.rowcount == 1
+
     def mandate_spent(self, mandate_id: str) -> int:
         """What this mandate has already committed. Read off the same rows the claim uses."""
         with self._lock:
