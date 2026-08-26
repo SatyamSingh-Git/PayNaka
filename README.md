@@ -25,7 +25,8 @@
   <a href="#a-real-razorpay-payment-gated"><b>Real Razorpay evidence</b></a> ·
   <a href="#the-four-defences-over-the-attacks-that-land"><b>The comparison</b></a> ·
   <a href="#glossary"><b>Glossary</b></a> ·
-  <a href="docs/THREATMODEL.md"><b>What it does not defend</b></a>
+  <a href="docs/THREATMODEL.md"><b>What it does not defend</b></a> ·
+  <a href="docs/WHAT_BROKE.md"><b>Everything that broke</b></a>
 </p>
 
 ### What we built, in one line
@@ -1050,6 +1051,7 @@ Every term this README uses that is not ordinary English, in the order you meet 
 
 | Document | Contents |
 | -------- | -------- |
+| [WHAT_BROKE.md](docs/WHAT_BROKE.md) | **every failure this project had**, what caused each, what we did about it — including the ones a fix introduced |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | trust boundary, components, the decision pipeline, why the credential split is the whole idea |
 | [EXPERIMENT.md](docs/EXPERIMENT.md) | the full experimental report: 1,512 runs, method, per-family results, threats to validity |
 | [THREATMODEL.md](docs/THREATMODEL.md) | what is defended, what is not, and the design refusals |
