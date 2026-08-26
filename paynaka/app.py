@@ -38,7 +38,13 @@ from paynaka.clock import FrozenClock, SystemClock
 from paynaka.engine import PayNaka
 from paynaka.env import load_env
 from paynaka.grants import Grants
-from paynaka.identity import Caller, TokenRegistry, Unauthenticated, load_approvers
+from paynaka.identity import (
+    Caller,
+    TokenRegistry,
+    Unauthenticated,
+    load_approvers,
+    load_shoppers,
+)
 from paynaka.issuer import Issuer, IssuerError, ShopperIntent
 from paynaka.mandate import (
     IntentMandate,
@@ -142,6 +148,10 @@ class Hub:
         # A separate set, and a token in both is a startup failure. A step-up the buying
         # agent can approve on its own behalf is not an escalation.
         self.approvers = load_approvers(self.callers)
+        # A third set, and the sharpest of the three. This is the credential that
+        # *creates* authority, and the agent is what that authority exists to bound --
+        # so an agent token must not open it. It used to.
+        self.shoppers = load_shoppers(self.callers, self.approvers)
         # Enforce unless the operator asked for otherwise, and fail to start on a typo.
         self.mode = Mode.from_env()
         self.state = SqliteState(os.environ.get(STATE_DB_ENV, ":memory:"), clock=self.clock)
@@ -237,6 +247,29 @@ def authenticated(request: Request) -> Caller:
             status_code=401,
             detail=str(exc),
             headers={"WWW-Authenticate": 'Bearer realm="paynaka"'},
+        ) from exc
+
+
+def shopper(request: Request) -> Caller:
+    """Identify the shopper on whose behalf authority is being created, or refuse.
+
+    A third credential set, and the one that matters most. A mandate bounds what the
+    buying agent may do; if the agent's own credential opens this route, the bound is
+    whatever the agent asked for. That is not a forged signature, which is hard -- it is a
+    genuine signature over an invented constraint, which is a POST.
+
+    An agent token gets 401 here rather than 403, deliberately. 403 would confirm that the
+    presented token is real and merely wrong for this route, which hands a prober half the
+    answer. The registry does not recognise it, and that is all any caller is told -- the
+    same one-shape refusal every other credential check in this service gives.
+    """
+    try:
+        return hub.shoppers.authenticate(request.headers.get("authorization"))
+    except Unauthenticated as exc:
+        raise HTTPException(
+            status_code=401,
+            detail=str(exc),
+            headers={"WWW-Authenticate": 'Bearer realm="paynaka-intent"'},
         ) from exc
 
 
@@ -497,19 +530,40 @@ def freeze_intent(intent: dict[str, Any], request: Request) -> dict[str, Any]:
     live in the same process as the gate -- whoever runs this holds the private key, and
     the checkpoint deliberately does not. It is here because the demo is one process.
 
+    That sentence used to be a comment rather than a fact. The route authenticated against
+    the **agent** registry, so the buying agent's own credential could ask this service to
+    sign a mandate of the agent's own design, redeem the grant, and spend inside a bound it
+    had written itself. No signature was forged; a genuine one was requested. An
+    independent audit found it and put the question well: who is allowed to create the
+    constraint? The answer was "the constrained agent".
+
+    Two changes close it. Issuance authenticates against a third credential set that no
+    agent token opens, and **the subject comes from the credential, not the body** -- a
+    shopper credential creates authority over its own account and no other. A body that
+    names a different subject is refused rather than silently overridden, because a caller
+    who believes they set a field and did not is a caller who will not read the response.
+
     Nothing about the catalogue is consulted. Intent is frozen before any merchant-
     controlled text is read, which is the ordering the whole design rests on, and
     `frozen_at` puts that ordering on the record rather than in the narration.
     """
-    # Issuing authority is a privileged act, so the surface that does it authenticates.
-    # It used to be open, which meant anybody who could reach the port could mint a mandate
-    # for themselves -- and the checkpoint would have verified it perfectly, because it was
-    # genuinely signed.
-    caller = authenticated(request)
+    caller = shopper(request)
+
+    # Server-side binding. The registry entry's name *is* the subject, so authority can
+    # only ever be created over the account whose credential was presented.
+    asked_for = str(intent.get("subject", "") or caller.name)
+    if asked_for != caller.name:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"credential {caller.name!r} cannot create authority for subject "
+                f"{asked_for!r}. A mandate is issued for the shopper who presented it."
+            ),
+        )
 
     try:
         stated = ShopperIntent(
-            subject=str(intent.get("subject", "")),
+            subject=caller.name,
             session_id=str(intent.get("session_id", "")),
             budget_paise=intent.get("budget_paise"),  # type: ignore[arg-type]
             skus=tuple(intent.get("skus", ())),

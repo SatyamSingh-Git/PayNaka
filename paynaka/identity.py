@@ -46,6 +46,7 @@ __all__ = [
     "TokenRegistry",
     "Unauthenticated",
     "load_approvers",
+    "load_shoppers",
     "parse_bearer",
 ]
 
@@ -64,8 +65,14 @@ DEV_TOKEN_PATH: Final[str] = "var/dev-agent-token"  # noqa: S105
 #: credential -- the whole point is that the agent cannot answer its own step-up.
 DEV_APPROVER_PATH: Final[str] = "var/dev-approver-token"
 
+#: The development shopper credential. Separate again, and for the sharper reason of
+#: the three: this is the credential that *creates* authority, and the agent is the
+#: thing that authority exists to constrain.
+DEV_SHOPPER_PATH: Final[str] = "var/dev-shopper-token"
+
 _ENV_VAR: Final[str] = "PAYNAKA_AGENT_TOKENS"
 _APPROVER_ENV_VAR: Final[str] = "PAYNAKA_APPROVER_TOKENS"
+_SHOPPER_ENV_VAR: Final[str] = "PAYNAKA_SHOPPER_TOKENS"
 
 
 def _to_bytes(value: str) -> bytes:
@@ -299,3 +306,73 @@ def load_approvers(agents: TokenRegistry) -> TokenRegistry:
             f"({sorted(overlap)}); the agent could approve its own step-up."
         )
     return approvers
+
+
+def _assert_separate(first: TokenRegistry, second: TokenRegistry, *, why: str) -> None:
+    """Two registries must share neither a name nor a token.
+
+    Names are checked because one label in two roles is a configuration nobody can reason
+    about afterwards. Tokens are checked because the *dangerous* configuration is not two
+    entries with the same label -- it is one secret that opens two doors, which no amount
+    of careful naming prevents.
+    """
+    shared = set(first.names) & set(second.names)
+    if shared:
+        raise ValueError(f"caller {sorted(shared)} is configured in both roles. {why}")
+    overlap = first.shares_a_token_with(second)
+    if overlap:
+        raise ValueError(f"one token is configured in both roles ({sorted(overlap)}). {why}")
+
+
+def load_shoppers(agents: TokenRegistry, approvers: TokenRegistry) -> TokenRegistry:
+    """The credentials permitted to *create* authority. The sharpest separation here.
+
+    A mandate exists to bound what the buying agent may do. If the buying agent's own
+    credential can ask this service to sign one, the bound is whatever the agent asked
+    for, and the design's central claim evaporates -- not by forging a signature, which is
+    hard, but by requesting a genuine one, which is a POST.
+
+    That is exactly what shipped. ``/api/intent`` authenticated against the *agent*
+    registry while its own docstring said "this is the shopper's surface, not the
+    agent's". An independent audit found it and asked the right question: **who is allowed
+    to create the constraint?** The answer was "the constrained agent".
+
+    So issuing is a third credential set, disjoint from both others by name and by token.
+    An agent token presented here does not authenticate, and the entry's *name is the
+    subject* the mandate is issued for -- a shopper credential can create authority over
+    its own account and no other, server-side, with nothing in the request body able to
+    change it.
+
+    Configured in ``PAYNAKA_SHOPPER_TOKENS`` as ``subject:token`` pairs. Left unset in
+    front of the simulator, a development credential is minted, the same way the agent and
+    approver ones are: the check stays live and only the origin of the secret changes. In
+    front of a real rail, unset means an empty registry, and an empty registry
+    authenticates nobody -- so an unconfigured production deployment issues no mandates at
+    all rather than issuing them to whoever asks.
+    """
+    raw = os.environ.get(_SHOPPER_ENV_VAR, "").strip()
+    if raw:
+        shoppers = TokenRegistry(_parse_entries(raw, var=_SHOPPER_ENV_VAR))
+    elif (os.environ.get("PAYNAKA_RAIL", "sim").strip().lower()) == "sim":
+        shoppers = TokenRegistry({"dev-shopper": load_or_create_dev_token(DEV_SHOPPER_PATH)})
+    else:
+        shoppers = TokenRegistry({})
+
+    _assert_separate(
+        agents,
+        shoppers,
+        why=(
+            "A mandate the buying agent can issue for itself is not a constraint on the "
+            "buying agent; it is a request form."
+        ),
+    )
+    _assert_separate(
+        approvers,
+        shoppers,
+        why=(
+            "Approving a step-up and creating authority are different powers. One "
+            "credential holding both can widen a mandate and then wave the widening "
+            "through."
+        ),
+    )
+    return shoppers

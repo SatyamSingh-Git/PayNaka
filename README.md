@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2153 tests" src="https://img.shields.io/badge/tests-2153-2F6B4F?style=flat-square">
-  <img alt="1385 adversarial" src="https://img.shields.io/badge/adversarial-1385-2F6B4F?style=flat-square">
+  <img alt="2351 tests" src="https://img.shields.io/badge/tests-2351-2F6B4F?style=flat-square">
+  <img alt="1484 adversarial" src="https://img.shields.io/badge/adversarial-1484-2F6B4F?style=flat-square">
   <img alt="coverage 92%" src="https://img.shields.io/badge/coverage-92%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -508,7 +508,7 @@ Both are closed by a **grant**: a short-lived, single-use ticket issued beside a
 redeemed once at MCP `initialize`.
 
 ```
-POST /api/intent            (authenticated)  ->  signed mandate + mandate_grant
+POST /api/intent            (SHOPPER credential)  ->  signed mandate + mandate_grant
 POST /mcp  initialize       {"mandateGrant": "..."}  ->  {"boundSession": "sess_..."}
 POST /mcp  tools/call       create_order  ->  checked against that mandate
 ```
@@ -524,9 +524,19 @@ long-lived authority — it should not be travelling on every session-init, logg
 everything in between. A grant is worthless minutes after issue and worthless again the
 moment it is used once.
 
-`/api/intent` authenticates. Issuing authority is a privileged act: an open issuing surface
-means anyone who can reach the port mints themselves a mandate, and the checkpoint verifies
-it perfectly — because it is genuinely signed.
+`/api/intent` authenticates — against a **third credential set that no agent token opens**.
+Issuing authority is a privileged act, and the sharpest question anyone asked about this
+project was *who is allowed to create the constraint?* For a while the answer was "the
+constrained agent": the route checked the agent registry, so a compromised buying agent
+needed no forged signature. It could ask this service for a genuine one over a mandate of
+its own design, and the checkpoint downstream would verify it perfectly, because it was
+genuine.
+
+Three roles, mutually disjoint by name *and* by token, each overlap a startup failure:
+**agent** spends, **approver** answers a step-up, **shopper** creates authority. And the
+subject is taken from the credential rather than the request body, so a shopper mints
+authority over their own account and nobody else's — a body naming a different subject is
+a 403, not a silent rewrite.
 
 Seventeen tests drive this over HTTP only. None of them may call `bind()`: a test that
 reaches for the internal helper proves the object works and says nothing about whether

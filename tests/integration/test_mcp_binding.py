@@ -32,6 +32,13 @@ from merchant.app import reset_catalog
 AGENT_TOKEN = "mcp-binding-agent-token-long-enough"
 AUTH = {"Authorization": f"Bearer {AGENT_TOKEN}"}
 
+#: The credential that *creates* authority, and a third distinct set. The agent's token
+#: opened this route until an audit asked who is allowed to create the constraint; the
+#: answer was "the constrained agent". The entry's name is the subject it can issue for.
+SHOPPER_TOKEN = "integration-shopper-token-long-enough"
+SHOP = {"Authorization": f"Bearer {SHOPPER_TOKEN}"}
+SUBJECT = "cust_kirana_001"
+
 OTHER_TOKEN = "mcp-binding-other-agent-token-long"
 OTHER = {"Authorization": f"Bearer {OTHER_TOKEN}"}
 
@@ -54,6 +61,7 @@ def client() -> Iterator[TestClient]:
     reset_catalog()
     with TestClient(app) as test_client:
         hub.callers = TokenRegistry({"buyer": AGENT_TOKEN, "other": OTHER_TOKEN})
+        hub.shoppers = TokenRegistry({SUBJECT: SHOPPER_TOKEN})
         yield test_client
     reset_catalog()
 
@@ -79,7 +87,7 @@ def rpc(
 def issue_intent(client: TestClient, *, headers: dict[str, str] | None = None) -> dict[str, object]:
     response = client.post(
         "/api/intent",
-        headers=headers or AUTH,
+        headers=headers or SHOP,
         json={
             "subject": "cust_kirana_001",
             "session_id": "sess_mcp",
@@ -250,7 +258,7 @@ class TestTheIssuingSurfaceIsNotOpen:
         response = client.post(
             "/api/intent",
             json={
-                "subject": "c",
+                "subject": SUBJECT,
                 "session_id": "s",
                 "budget_paise": BUDGET,
                 "skus": [ATTA],
@@ -262,7 +270,7 @@ class TestTheIssuingSurfaceIsNotOpen:
     def test_the_response_names_who_it_was_issued_to(self, client: TestClient) -> None:
         """So an audit can answer "who asked for this authority", which a session id
         cannot."""
-        assert issue_intent(client)["issued_to"] == "buyer"
+        assert issue_intent(client)["issued_to"] == SUBJECT
 
     def test_the_grant_is_not_the_mandate(self, client: TestClient) -> None:
         """A short-lived ticket, not the signed authority itself. The mandate should not be

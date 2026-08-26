@@ -44,7 +44,7 @@ version, so upstream schema drift will not be detected by this repository.
 Money-moving tools need a mandate bound to the session, or they refuse. The flow:
 
 ```
-POST /api/intent            (authenticated)  ->  signed mandate + mandate_grant
+POST /api/intent            (SHOPPER credential)  ->  signed mandate + mandate_grant
 POST /mcp   initialize      {"mandateGrant": "..."}  ->  {"boundSession": "sess_..."}
 POST /mcp   tools/call      create_order  ->  checked against that mandate
 ```

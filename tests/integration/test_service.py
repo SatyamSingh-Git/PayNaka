@@ -26,6 +26,13 @@ pytestmark = pytest.mark.integration
 AGENT_TOKEN = "integration-test-token-long-enough"
 AUTH = {"Authorization": f"Bearer {AGENT_TOKEN}"}
 
+#: The credential that *creates* authority, and a third distinct set. The agent's token
+#: opened this route until an audit asked who is allowed to create the constraint; the
+#: answer was "the constrained agent". The entry's name is the subject it can issue for.
+SHOPPER_TOKEN = "integration-shopper-token-long-enough"
+SHOP = {"Authorization": f"Bearer {SHOPPER_TOKEN}"}
+SUBJECT = "cust_kirana_001"
+
 #: A distinct approver credential. Distinct is the point: a step-up the agent can
 #: answer for itself is not an escalation.
 APPROVER_TOKEN = "integration-approver-token-long-enough"
@@ -38,6 +45,7 @@ def client() -> Iterator[TestClient]:
     with TestClient(app) as c:
         # After startup, because `hub.open()` rebuilds the registry from the environment.
         hub.callers = TokenRegistry({"integration-test": AGENT_TOKEN})
+        hub.shoppers = TokenRegistry({SUBJECT: SHOPPER_TOKEN})
         hub.approvers = TokenRegistry({"ops-anita": APPROVER_TOKEN})
         yield c
     reset_catalog()
@@ -356,7 +364,7 @@ class TestTheIntentSurface:
     def test_stated_intent_becomes_a_signed_mandate(self, client: TestClient) -> None:
         body = client.post(
             "/api/intent",
-            headers=AUTH,
+            headers=SHOP,
             json={
                 "subject": "cust_kirana_001",
                 "session_id": "sess_http",
@@ -373,9 +381,9 @@ class TestTheIntentSurface:
         """The ordering the design rests on, made a matter of record."""
         body = client.post(
             "/api/intent",
-            headers=AUTH,
+            headers=SHOP,
             json={
-                "subject": "c",
+                "subject": SUBJECT,
                 "session_id": "s",
                 "budget_paise": 199_900,
                 "skus": ["ATTA-5KG"],
@@ -400,13 +408,13 @@ class TestTheIntentSurface:
     ) -> None:
         """Nothing went wrong; something was declined."""
         base = {
-            "subject": "c",
+            "subject": SUBJECT,
             "session_id": "s",
             "budget_paise": 199_900,
             "skus": ["ATTA-5KG"],
             "destinations": ["addr_home"],
         }
-        response = client.post("/api/intent", headers=AUTH, json={**base, **payload})
+        response = client.post("/api/intent", headers=SHOP, json={**base, **payload})
         assert response.status_code == 400, why
 
 
