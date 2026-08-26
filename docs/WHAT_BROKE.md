@@ -19,9 +19,9 @@ a finished codebase.
 
 | Class | What it means | Who usually caught it |
 | --- | --- | --- |
-| Authority holes | the design's central promise did not hold | independent review, adversarial tests |
+| Authority holes | the design's central promise did not hold | adversaries **Satyam commissioned against his own project**, adversarial tests, and his decision to fix every finding rather than argue |
 | Money arithmetic | the ledger disagreed with reality | chaos harness, property tests, real runs |
-| Benchmark self-flattery | the measurement made us look better than we were | running it, then distrusting the result |
+| Benchmark self-flattery | the measurement made us look better than we were | running it and distrusting the result — **Satyam's refusal to accept a convenient negative finding** is what inverted the headline |
 | Claims we could not support | prose stronger than the code | review, and reading our own docs adversarially |
 | "Does it work for a stranger" | correct code, unusable by anyone else | **Satyam, every single time** |
 | Fixes that broke something else | the repair was the new defect | the test written for the repair |
@@ -35,6 +35,21 @@ project and it is worked through at the end.
 
 These are the worst category, because each one falsified the sentence the whole project
 exists to say.
+
+**Where they came from is the point.** Not one was found by the test suite, and none surfaced
+on its own. They exist in this document because Satyam **commissioned independent adversarial
+audits against a project that was already passing 2,400 tests** — twice, the second time after
+the first round had been fixed — and then relayed every finding without softening it.
+
+That is an uncomfortable thing to do to your own submission ten days before a deadline, and
+the easier paths were all available: dispute the finding, defer it, or file it as a known
+limitation. The instruction each time was *fix all*. §1.1 through §1.5 are the result, and
+every one of them would otherwise have shipped.
+
+The judgment underneath is worth naming, because it is rarer than the engineering: **a
+project whose headline claim is a security guarantee has to be attacked by somebody who is
+not its author.** Believing that strongly enough to pay for it, act on it, and publish the
+findings is the reason this section exists rather than the reason it is short.
 
 ### 1.1 `max_total` was a per-request ceiling wearing a budget's name
 
@@ -234,6 +249,20 @@ project demonstrates, in eight turns, without ever refusing.
 
 We had published a negative result derived from a sample of one.
 
+**The correction was not ours to notice.** The 0-of-245 result was comfortable: it let the
+benchmark argue that injection is too sparse to matter, and nothing in the harness was
+complaining. Satyam did not accept it. He named three specific paid models across three labs
+— DeepSeek V4 Flash, Poolside Laguna XS 2.1, Upstage Solar Pro 4 — asked what each would cost
+before committing, and authorised roughly $0.76 of real money to test a finding that was
+already written down and already convenient.
+
+All three fell. The headline inverted, four sections of the README were rewritten, and the
+project gained its strongest single result: **injection lands on frontier models, and the
+gate holds anyway.**
+
+The generalisable lesson is his rather than mine: *a negative result that saves you work is
+the one to distrust first.*
+
 ### 3.7 A breach counted outside its own denominator
 
 The README's per-model row read *"DeepSeek: 250 scored, 1 breached"* — while the figure quoted
@@ -254,6 +283,11 @@ retries run when a call *returns*. A hung call never returns, so none of it is e
 
 **An unbounded timeout does not make a benchmark slower. It silently stops it — and a stopped
 benchmark that is still running looks exactly like a working one.**
+
+It was found because Satyam asked *"are you stuck?"* — a question nothing in the harness was
+in a position to ask itself. Three live processes producing no output is indistinguishable
+from three processes working hard, and the only observer able to tell the difference was the
+one watching the clock rather than the logs.
 
 ---
 
@@ -567,9 +601,16 @@ and revised, out loud, to *"push as much as we can; if we can't do it further, n
 problem."* Knowing which of those two sentences a project needs, and when, is most of
 shipping.
 
-**Commissioning adversaries.** Bringing in independent audits — twice, on a project already
-passing 2,400 tests — and relaying findings without softening them. That is not a comfortable
-instinct and it is why §1 exists at all.
+**Commissioning adversaries, and reading results sceptically.** Two independent audits
+against a project already passing 2,400 tests, findings relayed unsoftened, and *fix all* as
+the answer each time — §1 exists entirely because of that. The same scepticism applied to our
+own measurements: the 0-of-245 injection result was convenient and he refused it, naming three
+paid models and authorising real money to check a finding that was already published (§3.6);
+*"are you stuck?"* is what exposed three sweeps parked on an SDK default (§3.8); and asking
+for the with/without comparison to be laid out explicitly is what put a breach and its
+denominator on the same line, where the mismatch became visible (§3.7).
+
+None of that is code. All of it changed what the code says.
 
 ### Claude — the building
 
