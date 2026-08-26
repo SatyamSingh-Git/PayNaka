@@ -412,6 +412,40 @@ class SqliteState:
     def record_capture(self, payment_id: str, amount: int, *, clock: Clock | None = None) -> None:
         self._append_ledger(payment_id, "capture", amount, clock)
 
+    def reconcile_capture(
+        self, payment_id: str, provider_total: int, *, clock: Clock | None = None
+    ) -> int:
+        """Bring the ledger up to the provider's reported captured *total*. Returns the delta.
+
+        "This payment's captured total is X" is a statement about a total, not an event, and
+        observing it twice must not double it. :meth:`record_capture` appends, which is
+        right for an event and wrong for an observation.
+
+        Found by running the real Razorpay lifecycle script twice. Each run fetched the
+        payment, saw ``captured: true, amount: 199900``, and appended -- so the ledger said
+        Rs 3,998 had been captured on a Rs 1,999 payment. Every downstream bound is computed
+        from that number, so a refund of the full amount then fitted inside the inflated
+        balance and the evidence stopped demonstrating what it claimed.
+
+        The webhook path deduplicates on the provider's event id and does not need this. A
+        fetch has no event id, and neither does a reconciliation job reading balances back
+        after an outage, which is the other place this belongs.
+
+        A provider total *below* what we already hold records nothing and returns 0. That is
+        the conservative direction: a partial view of a payment must not silently erase
+        ledger history, and a genuine reversal is its own entry.
+        """
+        if isinstance(provider_total, bool) or not isinstance(provider_total, int):
+            raise StateError(
+                f"a captured total must be int paise, got {type(provider_total).__name__}"
+            )
+        already = self.captured_amount(payment_id)
+        delta = provider_total - already
+        if delta <= 0:
+            return 0
+        self.record_capture(payment_id, delta, clock=clock)
+        return delta
+
     def record_refund(self, payment_id: str, amount: int, *, clock: Clock | None = None) -> None:
         self._append_ledger(payment_id, "refund", amount, clock)
 

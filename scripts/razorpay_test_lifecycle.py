@@ -312,6 +312,26 @@ def phase_two(payment_id: str) -> int:
     from paynaka.rails.razorpay_rail import RazorpayRail
 
     probe = RazorpayRail().fetch_payment(payment_id)
+
+    # The provider's half of the authority graph. Razorpay has just told us which order
+    # this payment settled, and that fact is what lets the gate answer "whose payment is
+    # this" on the refund below. In a deployment it arrives in a `payment.captured`
+    # webhook; here the same fact arrives on a fetch, because this script is standing in
+    # for the webhook that a local run has no public URL to receive.
+    #
+    # Without it the refund is refused as payment.unknown_origin -- which is the correct
+    # answer to "refund a payment that came from nowhere", and was the wrong answer here:
+    # this payment came from an order PayNaka created two minutes earlier under a mandate
+    # it still holds. Missing this link is what the real lifecycle exposed that no unit
+    # test had.
+    settled_order = str(probe.raw.get("order_id") or "")
+    if settled_order:
+        naka.state.link_payment(payment_id, settled_order)
+        say(
+            f"  {DIM}payment belongs to {settled_order}, under mandate "
+            f"{signed.mandate.mandate_id}{OFF}"
+        )
+
     if probe.raw.get("captured"):
         say(
             f"  {'capture_payment':<18}{YELLOW}{'SKIPPED':<8}{OFF}{DIM}already captured by "
@@ -334,7 +354,18 @@ def phase_two(payment_id: str) -> int:
             },
         )
         # The ledger has to know, or the refund below has no balance to claim against.
-        naka.state.record_capture(payment_id, probe.amount, clock=naka.clock)
+        # Reconcile to the provider's reported total rather than appending what it
+        # reports each time we look. Found by running this script twice: the second run
+        # recorded a second capture for a payment that was captured once, and the ledger
+        # said Rs 3,998 had been captured on a Rs 1,999 payment. Every downstream bound is
+        # computed from that number, so an over-refund of the full amount then fitted
+        # inside the inflated balance and the evidence stopped demonstrating what it
+        # claimed.
+        #
+        # "The provider says this payment's captured total is X" is a statement about a
+        # total, not an event, and observing it twice must not double it. The webhook path
+        # is deduplicated by event id; a fetch has no event id, so it reconciles instead.
+        naka.state.reconcile_capture(payment_id, probe.amount, clock=naka.clock)
         return _refund_phase(naka, signed, payment_id)
 
     captured = naka.execute(

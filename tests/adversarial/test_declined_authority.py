@@ -180,3 +180,71 @@ class TestTheReleaseItself:
 
         assert state.mandate_spent("mnd_a") == 0
         assert state.mandate_spent("mnd_b") == 1_000
+
+
+class TestObservingACaptureTwiceDoesNotDoubleIt:
+    """A provider's captured *total* is not an event.
+
+    Found by running the real Razorpay lifecycle script twice. Each run fetched the payment,
+    saw `captured: true, amount: 199900`, and appended a ledger entry -- so the ledger said
+    Rs 3,998 had been captured on a Rs 1,999 payment. Every downstream bound reads that
+    number, so an over-refund of the full amount then fitted inside the inflated balance,
+    and the committed evidence for "an over-refund is refused" stopped demonstrating it.
+
+    `record_capture` appends, which is right for an event. `reconcile_capture` records the
+    difference, which is right for an observation.
+    """
+
+    def state(self) -> SqliteState:
+        return SqliteState(":memory:", clock=FrozenClock.at_ist(NOW))
+
+    def test_the_first_observation_records_the_whole_total(self) -> None:
+        state = self.state()
+        assert state.reconcile_capture("pay_1", 199_900) == 199_900
+        assert state.captured_amount("pay_1") == 199_900
+
+    def test_a_second_identical_observation_records_nothing(self) -> None:
+        """The bug, exactly."""
+        state = self.state()
+        state.reconcile_capture("pay_1", 199_900)
+        assert state.reconcile_capture("pay_1", 199_900) == 0
+        assert state.captured_amount("pay_1") == 199_900
+
+    def test_many_observations_stay_at_the_total(self) -> None:
+        state = self.state()
+        for _ in range(20):
+            state.reconcile_capture("pay_1", 199_900)
+        assert state.captured_amount("pay_1") == 199_900
+
+    def test_a_later_partial_capture_records_only_the_difference(self) -> None:
+        """The other direction, and the reason this is not just a "record once" flag.
+        Razorpay can capture in parts, and the second observation is a larger total."""
+        state = self.state()
+        state.reconcile_capture("pay_1", 100_000)
+        assert state.reconcile_capture("pay_1", 199_900) == 99_900
+        assert state.captured_amount("pay_1") == 199_900
+
+    def test_a_smaller_total_erases_nothing(self) -> None:
+        """A partial view of a payment must not silently rewrite ledger history. A genuine
+        reversal is its own entry, not a smaller number arriving late."""
+        state = self.state()
+        state.reconcile_capture("pay_1", 199_900)
+        assert state.reconcile_capture("pay_1", 50_000) == 0
+        assert state.captured_amount("pay_1") == 199_900
+
+    def test_it_does_not_confuse_two_payments(self) -> None:
+        state = self.state()
+        state.reconcile_capture("pay_1", 199_900)
+        assert state.reconcile_capture("pay_2", 199_900) == 199_900
+        assert state.captured_amount("pay_1") == 199_900
+        assert state.captured_amount("pay_2") == 199_900
+
+    @pytest.mark.parametrize("total", ["199900", 1999.0, True, None])
+    def test_a_total_that_is_not_int_paise_is_refused(self, total: object) -> None:
+        from paynaka.state import StateError
+
+        with pytest.raises(StateError):
+            self.state().reconcile_capture("pay_1", total)  # type: ignore[arg-type]
+
+    def test_a_zero_total_records_nothing(self) -> None:
+        assert self.state().reconcile_capture("pay_1", 0) == 0
