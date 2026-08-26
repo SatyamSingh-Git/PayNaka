@@ -44,6 +44,7 @@ from paynaka.issuer import Issuer, ShopperIntent
 from paynaka.mandate import MandateSigner, SignedMandate, load_or_create_signing_key
 from paynaka.policy import Policy
 from paynaka.rails.razorpay_rail import RazorpayRail
+from paynaka.redact import redact
 from paynaka.state import SqliteState
 from paynaka.tty import BOLD, DIM, GREEN, OFF, RED, YELLOW, say
 
@@ -96,9 +97,18 @@ def stack() -> tuple[PayNaka, SignedMandate]:
 
 
 def record(name: str, payload: dict[str, Any]) -> None:
+    """Write one piece of evidence, with personal data stripped on the way out.
+
+    Everything here is committed and pushed, and a Razorpay payment response carries
+    whatever the shopper typed at checkout. A real mobile number reached a public
+    repository this way. `redact` is applied at the point of writing rather than left to
+    whoever runs the script, because the person running it is looking at a terminal and
+    not at the file.
+    """
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     path = EVIDENCE / f"{name}.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    safe = redact(payload)
+    path.write_text(json.dumps(safe, indent=2, sort_keys=True, default=str), encoding="utf-8")
     say(f"{DIM}  wrote {path}{OFF}")
 
 
