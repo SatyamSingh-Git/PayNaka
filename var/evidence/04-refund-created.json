@@ -5,17 +5,17 @@
     "evidence": {
       "amount": 49900,
       "authorised": 199900,
-      "mandate_remaining": 199900
+      "mandate_remaining": 0
     },
-    "latency_us": 2100,
-    "mandate_id": "mnd_36a08143759849ef97803ed3",
+    "latency_us": 3162,
+    "mandate_id": "mnd_3f7836599e7e4f828bf2f5e0",
     "reason": "within the frozen intent and merchant policy",
     "replayed": false,
-    "request_id": "req_refund_pay_TTfuF5dtZY8YdI",
+    "request_id": "req_refund_pay_TUQNIPW6IXVwYe",
     "verdict": "ALLOW"
   },
   "outcome": "refunded",
-  "payment_id": "pay_TTfuF5dtZY8YdI",
+  "payment_id": "pay_TUQNIPW6IXVwYe",
   "raw": {
     "acquirer_data": {
       "arn": null
@@ -23,18 +23,18 @@
     "amount": 49900,
     "base_amount": 49900,
     "batch_id": null,
-    "created_at": 1787589507,
+    "created_at": 1787753052,
     "currency": "INR",
     "entity": "refund",
-    "id": "rfnd_TTfwxO2pJfOK3j",
+    "id": "rfnd_TUQOFeBeAENVzw",
     "notes": {
-      "paynaka_audit_head": "12c9244864d75da3",
-      "paynaka_audit_len": "6",
-      "paynaka_idempotency_key": "refund_pay_TTfuF5dtZY8YdI",
-      "paynaka_mandate": "mnd_36a08143759849ef97803ed3",
-      "paynaka_request": "req_refund_pay_TTfuF5dtZY8YdI"
+      "paynaka_audit_head": "b0fef7322324d672",
+      "paynaka_audit_len": "4",
+      "paynaka_idempotency_key": "refund_pay_TUQNIPW6IXVwYe",
+      "paynaka_mandate": "mnd_3f7836599e7e4f828bf2f5e0",
+      "paynaka_request": "req_refund_pay_TUQNIPW6IXVwYe"
     },
-    "payment_id": "pay_TTfuF5dtZY8YdI",
+    "payment_id": "pay_TUQNIPW6IXVwYe",
     "receipt": null,
     "speed_processed": "normal",
     "speed_requested": "normal",

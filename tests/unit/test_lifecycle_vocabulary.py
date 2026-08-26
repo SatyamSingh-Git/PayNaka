@@ -162,3 +162,44 @@ class TestTheDocsDescribeTheCodeTheyDocument:
         architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         assert "authority graph" in architecture
         assert "reconcile_capture" in architecture
+
+
+class TestTheReadmeQuotesTheRunItShipsWith:
+    """The README printed `order_TTfEwDF...` from a run whose files were no longer in the
+    repository. An audit read the committed evidence, found different ids, and was right to
+    call it a discrepancy.
+
+    Every provider id the README quotes must appear in `var/evidence/`. Cheap to check, and
+    it fails the moment somebody regenerates the lifecycle and forgets the prose -- which is
+    the only way this ever goes wrong.
+    """
+
+    def test_every_quoted_provider_id_is_in_the_evidence(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        evidence = "\n".join(
+            path.read_text(encoding="utf-8") for path in (ROOT / "var" / "evidence").glob("*.json")
+        )
+        quoted = set(re.findall(r"\b(?:order|pay|rfnd|mnd)_[A-Za-z0-9]{8,}\b", readme))
+        assert quoted, "the README quotes no provider ids; the evidence section went missing"
+
+        missing = sorted(identifier for identifier in quoted if identifier not in evidence)
+        assert not missing, (
+            f"README quotes ids that are in no evidence file: {missing}. The lifecycle was "
+            f"regenerated and the prose was not."
+        )
+
+    def test_the_whole_chain_carries_one_mandate(self) -> None:
+        """The finding itself, asserted against the files rather than the prose."""
+        import json
+
+        mandates = set()
+        for name in ("01-order-created", "03-payment-captured", "04-refund-created"):
+            path = ROOT / "var" / "evidence" / f"{name}.json"
+            notes = (json.loads(path.read_text(encoding="utf-8")).get("raw") or {}).get("notes")
+            assert notes, f"{name} carries no paynaka notes"
+            mandates.add(notes["paynaka_mandate"])
+
+        assert len(mandates) == 1, (
+            f"the committed lifecycle spans {len(mandates)} mandates: {sorted(mandates)}. "
+            f"Order, capture and refund must be one authority chain."
+        )

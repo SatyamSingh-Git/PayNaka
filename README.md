@@ -12,8 +12,8 @@
 <p align="center">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-1C4C69?style=flat-square">
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-1C4C69?style=flat-square">
-  <img alt="2351 tests" src="https://img.shields.io/badge/tests-2351-2F6B4F?style=flat-square">
-  <img alt="1484 adversarial" src="https://img.shields.io/badge/adversarial-1484-2F6B4F?style=flat-square">
+  <img alt="2460 tests" src="https://img.shields.io/badge/tests-2460-2F6B4F?style=flat-square">
+  <img alt="1531 adversarial" src="https://img.shields.io/badge/adversarial-1531-2F6B4F?style=flat-square">
   <img alt="coverage 92%" src="https://img.shields.io/badge/coverage-92%25-2F6B4F?style=flat-square">
   <img alt="Test mode only" src="https://img.shields.io/badge/razorpay-test%20mode%20only-A63B29?style=flat-square">
 </p>
@@ -405,12 +405,22 @@ mode, driven through the checkpoint. `make razorpay-lifecycle`, raw responses co
 [var/evidence/](var/evidence/).
 
 ```
-order      order_TTfEwDFYYo2xsb    ₹1,999.00   created through the gate
-payment    pay_TTfuF5dtZY8YdI      ₹1,999.00   captured — a person authenticated at Checkout
-refund     rfnd_TTfwxO2pJfOK3j       ₹499.00   partial, gated, balance claimed
+mandate    mnd_3f7836599e7e4f828bf2f5e0        signed before any catalogue was read
+order      order_TUQ3WyFQ42uPkY    ₹1,999.00   created through the gate
+payment    pay_TUQNIPW6IXVwYe      ₹1,999.00   captured — a person authenticated at Checkout
+refund     rfnd_TUQOFeBeAENVzw       ₹499.00   partial, gated, balance claimed
 ```
 
 Razorpay's own record confirms it: `amount_refunded: 49900`, `refund_status: partial`.
+
+**One mandate runs the whole chain**, and Razorpay holds the proof: `notes.paynaka_mandate`
+on the order, on the payment and on the refund all read `mnd_3f7836599e7e4f828bf2f5e0`. That
+line is here because it was once false. An audit read these same files and found two mandate
+ids across one lifecycle — the script issued a fresh one per process — so the evidence showed
+working API calls and not authority continuity. The gate now walks `payment → order →
+mandate` before it will capture or refund anything, and the first honest run of it refused
+the refund outright: the payment had reached us from Checkout with nothing recording which
+order it settled.
 
 **The two refusals are the point.** On the same real rail, in the same run:
 

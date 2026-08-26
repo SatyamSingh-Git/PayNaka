@@ -3,18 +3,18 @@
   "captured_paise": 199900,
   "note": "The order was created with Razorpay's default automatic capture, so the payment was captured when the customer authenticated. PayNaka did not issue the capture call and does not claim to have.",
   "outcome": "payment_captured",
-  "payment_id": "pay_TTfuF5dtZY8YdI",
+  "payment_id": "pay_TUQNIPW6IXVwYe",
   "raw": {
     "acquirer_data": {
-      "bank_transaction_id": "4903717"
+      "bank_transaction_id": "4139214"
     },
     "amount": 199900,
     "amount_refunded": 0,
-    "bank": "BARB_R",
+    "bank": "CNRB",
     "captured": true,
     "card_id": null,
     "contact": "[redacted]",
-    "created_at": 1787589354,
+    "created_at": 1787752998,
     "currency": "INR",
     "description": "5kg atta",
     "email": "[redacted]",
@@ -25,18 +25,18 @@
     "error_source": null,
     "error_step": null,
     "fee": 4718,
-    "id": "pay_TTfuF5dtZY8YdI",
+    "id": "pay_TUQNIPW6IXVwYe",
     "international": false,
     "invoice_id": null,
     "method": "netbanking",
     "notes": {
-      "paynaka_audit_head": "09b720719c07dec7",
+      "paynaka_audit_head": "7effe4e034964ffa",
       "paynaka_audit_len": "1",
-      "paynaka_idempotency_key": "paynaka_lifecycle_892f0e46",
-      "paynaka_mandate": "mnd_24ac4809e13543b1892f0e46",
-      "paynaka_request": "req_paynaka_lifecycle_892f0e46"
+      "paynaka_idempotency_key": "paynaka_lifecycle_8bf2f5e0",
+      "paynaka_mandate": "mnd_3f7836599e7e4f828bf2f5e0",
+      "paynaka_request": "req_paynaka_lifecycle_8bf2f5e0"
     },
-    "order_id": "order_TTfEwDFYYo2xsb",
+    "order_id": "order_TUQ3WyFQ42uPkY",
     "refund_status": null,
     "status": "captured",
     "tax": 720,

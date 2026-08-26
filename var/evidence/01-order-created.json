@@ -8,33 +8,33 @@
       "authorised": 199900,
       "mandate_remaining": 0
     },
-    "latency_us": 1892,
-    "mandate_id": "mnd_24ac4809e13543b1892f0e46",
+    "latency_us": 1806,
+    "mandate_id": "mnd_3f7836599e7e4f828bf2f5e0",
     "reason": "within the frozen intent and merchant policy",
     "replayed": false,
-    "request_id": "req_paynaka_lifecycle_892f0e46",
+    "request_id": "req_paynaka_lifecycle_8bf2f5e0",
     "verdict": "ALLOW"
   },
-  "order_id": "order_TTfEwDFYYo2xsb",
+  "order_id": "order_TUQ3WyFQ42uPkY",
   "outcome": "order_created",
   "raw": {
     "amount": 199900,
     "amount_due": 199900,
     "amount_paid": 0,
     "attempts": 0,
-    "created_at": 1787587007,
+    "created_at": 1787751875,
     "currency": "INR",
     "entity": "order",
-    "id": "order_TTfEwDFYYo2xsb",
+    "id": "order_TUQ3WyFQ42uPkY",
     "notes": {
-      "paynaka_audit_head": "09b720719c07dec7",
+      "paynaka_audit_head": "7effe4e034964ffa",
       "paynaka_audit_len": "1",
-      "paynaka_idempotency_key": "paynaka_lifecycle_892f0e46",
-      "paynaka_mandate": "mnd_24ac4809e13543b1892f0e46",
-      "paynaka_request": "req_paynaka_lifecycle_892f0e46"
+      "paynaka_idempotency_key": "paynaka_lifecycle_8bf2f5e0",
+      "paynaka_mandate": "mnd_3f7836599e7e4f828bf2f5e0",
+      "paynaka_request": "req_paynaka_lifecycle_8bf2f5e0"
     },
     "offer_id": null,
-    "receipt": "req_paynaka_lifecycle_892f0e46",
+    "receipt": "req_paynaka_lifecycle_8bf2f5e0",
     "status": "created"
   }
 }

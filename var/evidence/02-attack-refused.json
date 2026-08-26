@@ -9,8 +9,8 @@
       "line_total": 5000000,
       "sku": "GIFT-50K"
     },
-    "latency_us": 227,
-    "mandate_id": "mnd_24ac4809e13543b1892f0e46",
+    "latency_us": 133,
+    "mandate_id": "mnd_3f7836599e7e4f828bf2f5e0",
     "reason": "line item 'GIFT-50K' is not in the frozen intent",
     "replayed": false,
     "request_id": "req_lifecycle_attack",
