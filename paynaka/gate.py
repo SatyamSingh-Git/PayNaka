@@ -427,6 +427,64 @@ def check_destination(request: MoneyRequest, mandate: IntentMandate) -> GateDeci
     return None
 
 
+#: Actions that name a payment somebody else's money is already sitting in.
+PAYMENT_ACTIONS = frozenset({"capture_payment", "create_refund"})
+
+
+def check_payment_authority(
+    request: MoneyRequest, mandate: IntentMandate, state: SqliteState
+) -> GateDecision | None:
+    """Does this payment trace back to an order this shopper authorised?
+
+    Capture and refund name a ``payment_id`` and nothing else. Every other check on those
+    paths was arithmetic -- is the amount within the captured balance, is there a return on
+    record -- and all of it was right about the *amount* while never asking whose payment
+    it was. An audit found the consequence: a fresh refund-capable mandate could operate on
+    any payment that happened to be in state.
+
+    So the graph is walked. ``payment -> order -> mandate, subject`` and the subject must
+    be the one this mandate was issued to.
+
+    **Why the subject and not the mandate.** Binding to ``mandate_id`` reads stronger and
+    is wrong: a refund is a legitimate thing to do a week later, under a fresh mandate the
+    shopper signs for exactly that purpose, long after the buying mandate expired. Refusing
+    it would mean either refunds that cannot happen or purchase mandates kept alive for
+    months, and the second is a far worse bargain than the check is worth. The subject is
+    the containment property -- authority over *this shopper's* money and nobody else's --
+    and it holds under both. The mandate and session are recorded anyway, so the evidence
+    shows the whole chain even where only one link is enforced.
+
+    A payment with no recorded origin is refused. That is the fail-closed reading of "we
+    have never seen this", and it is also what makes the check bite: a payment id typed
+    into state by hand, or invented, or belonging to a different deployment, resolves to
+    nothing and stops here.
+    """
+    if request.action not in PAYMENT_ACTIONS:
+        return None
+    if not request.payment_id:
+        # `check_refund_bounds` already names this condition precisely, and two check ids
+        # for one condition is a denial a reader has to look up twice.
+        if request.action == "create_refund":
+            return None
+        return _deny("capture.no_payment", "the capture names no payment")
+
+    authority = state.authority_for(request.payment_id)
+    if authority is None:
+        return _deny(
+            "payment.unknown_origin",
+            "this payment was not created under any order this checkpoint issued",
+            payment_id=request.payment_id,
+        )
+    if authority.subject != mandate.subject:
+        return _deny(
+            "payment.not_this_shopper",
+            "this payment belongs to a different shopper's order",
+            payment_id=request.payment_id,
+            order_id=authority.order_id,
+        )
+    return None
+
+
 def check_refund_bounds(
     request: MoneyRequest, mandate: IntentMandate, state: SqliteState, policy: Policy
 ) -> GateDecision | None:
@@ -615,6 +673,7 @@ def evaluate(
         lambda: check_reference_price(request, mandate),
         lambda: check_total(request, mandate, policy),
         lambda: check_destination(request, mandate),
+        lambda: check_payment_authority(request, mandate, state),
         lambda: check_refund_bounds(request, mandate, state, policy),
         lambda: check_daily_cap(request, state, policy, clock),
         lambda: check_regulatory(request, mandate, state, policy, clock),

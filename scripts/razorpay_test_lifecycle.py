@@ -60,12 +60,41 @@ HOME = "addr_home"
 PRICE = 199_900
 
 
+#: The signed mandate, kept between phases. Without this the file below described a
+#: continuity it did not have.
+MANDATE_PATH = pathlib.Path("var/lifecycle-mandate.json")
+
+
+def _remembered_mandate(verifier: object) -> SignedMandate | None:
+    """The mandate an earlier phase issued, if it is still on disk and still valid.
+
+    Re-verified rather than trusted: a file is not a credential, and one that has been
+    edited, truncated or expired must produce a fresh mandate rather than a confusing
+    failure three calls later.
+    """
+    if not MANDATE_PATH.is_file():
+        return None
+    try:
+        signed = SignedMandate.from_dict(json.loads(MANDATE_PATH.read_text(encoding="utf-8")))
+        verifier.verify(signed)  # type: ignore[attr-defined]
+    except Exception:  # any failure means "issue a new one", and it says so below
+        say(f"{DIM}  the remembered mandate no longer verifies; issuing a fresh one{OFF}")
+        return None
+    return signed
+
+
 def stack() -> tuple[PayNaka, SignedMandate]:
     """A checkpoint wired to the real rail, on durable storage, with a persistent key.
 
     Durable on purpose: phase two runs in a different process, and a mandate the second
     process cannot verify -- or an idempotency key it has never heard of -- would make the
     two halves unrelated runs rather than one lifecycle.
+
+    That sentence used to be aspiration. Every call issued a *new* mandate, so the
+    committed evidence showed `mnd_24ac...` on the order and the capture and `mnd_36a0...`
+    on the refund -- two mandates in one lifecycle, anchored in Razorpay's own notes where
+    anybody could read them. An audit did. The mandate is now written down when it is
+    issued and re-verified when it is reloaded, so the whole chain carries one id.
     """
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     clock = SystemClock()
@@ -78,6 +107,10 @@ def stack() -> tuple[PayNaka, SignedMandate]:
         verifier=signer.verifier(),
         clock=clock,
     )
+    remembered = _remembered_mandate(signer.verifier())
+    if remembered is not None:
+        return naka, remembered
+
     issued = Issuer(signer).issue(
         ShopperIntent(
             subject="cust_kirana_001",
@@ -93,6 +126,8 @@ def stack() -> tuple[PayNaka, SignedMandate]:
         ),
         clock=clock,
     )
+    MANDATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MANDATE_PATH.write_text(json.dumps(issued.signed.to_dict(), indent=2), encoding="utf-8")
     return naka, issued.signed
 
 

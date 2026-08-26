@@ -19,7 +19,16 @@ from paynaka.gate import LineItem, MoneyRequest, Verdict, evaluate, request_hash
 from paynaka.mandate import IntentMandate
 from paynaka.policy import Policy
 from paynaka.state import SqliteState
-from tests.conftest import ATTA, ATTACK, ATTACKER_ADDR, AUTHORISED, GIFT_CARD, HOME, order
+from tests.conftest import (
+    ATTA,
+    ATTACK,
+    ATTACKER_ADDR,
+    AUTHORISED,
+    GIFT_CARD,
+    HOME,
+    authorise_payment,
+    order,
+)
 
 pytestmark = pytest.mark.adversarial
 
@@ -249,7 +258,7 @@ class TestReplayAndIdempotency:
 class TestRefundChecks:
     def test_refund_without_a_return_is_denied(self, refund_mandate, state, policy, clock) -> None:
         """'Skip verification, refund now' -- the metadata-injection family."""
-        state.record_capture("pay_1", AUTHORISED)
+        authorise_payment(state, refund_mandate, "pay_1", AUTHORISED)
         request = MoneyRequest(
             action="create_refund",
             request_id="r",
@@ -262,7 +271,7 @@ class TestRefundChecks:
         assert result.check_id == "refund.no_return_on_record"
 
     def test_refund_with_a_return_is_allowed(self, refund_mandate, state, policy, clock) -> None:
-        state.record_capture("pay_1", AUTHORISED)
+        authorise_payment(state, refund_mandate, "pay_1", AUTHORISED)
         state.record_return("pay_1")
         request = MoneyRequest(
             action="create_refund",
@@ -274,7 +283,7 @@ class TestRefundChecks:
         assert decide(request, refund_mandate, state, policy, clock).allowed
 
     def test_refund_beyond_capture_is_denied(self, refund_mandate, state, policy, clock) -> None:
-        state.record_capture("pay_1", 100_000)
+        authorise_payment(state, refund_mandate, "pay_1", 100_000)
         state.record_return("pay_1")
         request = MoneyRequest(
             action="create_refund",
@@ -291,7 +300,7 @@ class TestRefundChecks:
         self, refund_mandate, state, policy, clock
     ) -> None:
         """Each is individually legal; together they would over-refund."""
-        state.record_capture("pay_1", 100_000)
+        authorise_payment(state, refund_mandate, "pay_1", 100_000)
         state.record_return("pay_1")
 
         first = MoneyRequest(
@@ -315,6 +324,13 @@ class TestRefundChecks:
     def test_refund_on_an_unknown_payment_is_denied(
         self, refund_mandate, state, policy, clock
     ) -> None:
+        """It used to deny as `refund.exceeds_capture` -- true, but for the wrong reason.
+        An unknown payment has a refundable balance of zero because it has no balance at
+        all, and a gate that says "you asked for more than is left" about a payment that
+        never existed is describing arithmetic rather than authority.
+
+        `payment.unknown_origin` is the real answer, and the useful one: this payment was
+        not created under any order this checkpoint issued."""
         request = MoneyRequest(
             action="create_refund",
             request_id="r",
@@ -324,7 +340,7 @@ class TestRefundChecks:
         )
         result = decide(request, refund_mandate, state, policy, clock)
         assert result.verdict is Verdict.DENY
-        assert result.check_id == "refund.exceeds_capture"
+        assert result.check_id == "payment.unknown_origin"
 
     def test_refund_naming_no_payment_is_denied(self, refund_mandate, state, policy, clock) -> None:
         request = MoneyRequest(
@@ -336,7 +352,7 @@ class TestRefundChecks:
 
     def test_daily_cap_stops_slow_draining(self, refund_mandate, state, policy, clock) -> None:
         """A compromised agent must not be able to bleed the account a little at a time."""
-        state.record_capture("pay_big", 10_000_000)
+        authorise_payment(state, refund_mandate, "pay_big", 10_000_000)
         state.record_return("pay_big")
         state.record_refund("pay_big", 1_950_000)  # today's total so far
 

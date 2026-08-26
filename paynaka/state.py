@@ -29,9 +29,37 @@ from typing import Any, Final, Self
 from paynaka.clock import IST, Clock
 from paynaka.money import MoneyError, to_paise
 
-__all__ = ["Escalation", "IdempotencyRecord", "SqliteState", "StateError"]
+__all__ = ["Authority", "Escalation", "IdempotencyRecord", "SqliteState", "StateError"]
 
 _SCHEMA: Final[str] = """
+-- The authority graph: which mandate created which order, and which payment came from it.
+--
+-- Capture and refund name a payment_id and nothing else, so the gate could check that a
+-- refund did not exceed the captured balance while having no idea whose payment it was.
+-- An audit put it plainly: a fresh refund-capable mandate could operate on any payment
+-- that happened to be in state. The balance arithmetic was right and the authority
+-- question was never asked.
+--
+-- Two tables rather than one because the two facts are learned at different times and by
+-- different parties. We create the order and know the mandate behind it; the payment id
+-- arrives later, from the provider, after a human authenticated at Checkout -- which is
+-- the step an agent cannot take, and the reason this graph has a gap an agent cannot
+-- close on its own.
+CREATE TABLE IF NOT EXISTS orders (
+    order_id   TEXT PRIMARY KEY,
+    mandate_id TEXT NOT NULL,
+    subject    TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    at         INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+    payment_id TEXT PRIMARY KEY,
+    order_id   TEXT NOT NULL,
+    at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS payments_order ON payments (order_id);
+
 CREATE TABLE IF NOT EXISTS nonces (
     nonce      TEXT PRIMARY KEY,
     mandate_id TEXT NOT NULL,
@@ -219,6 +247,22 @@ class Escalation:
             "decided_at": self.decided_at,
             "decided_by": self.decided_by,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class Authority:
+    """Who a payment traces back to: the order, the mandate, the shopper, the session.
+
+    Returned by :meth:`SqliteState.authority_for`. The gate compares ``subject`` and
+    nothing else, deliberately -- see the check for why binding to ``mandate_id`` would be
+    stronger on paper and wrong in practice. The other three are carried because evidence
+    should show the whole chain even where only one link is enforced.
+    """
+
+    order_id: str
+    mandate_id: str
+    subject: str
+    session_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -669,6 +713,74 @@ class SqliteState:
                 "SELECT key, payment_id, amount FROM reservations WHERE state = 'held' ORDER BY at"
             ).fetchall()
         return [(str(r[0]), str(r[1]), int(r[2])) for r in rows]
+
+    # ---------------------------------------------------------------- authority graph
+    def record_order(
+        self,
+        order_id: str,
+        *,
+        mandate_id: str,
+        subject: str,
+        session_id: str,
+        clock: Clock | None = None,
+    ) -> None:
+        """Remember who an order was created for. Written when the rail confirms one.
+
+        ``INSERT OR IGNORE``: an order id is provider-assigned and unique, so a second
+        write for the same id is a replay of the same fact. Overwriting would let a later
+        request rewrite an earlier order's authority, which is the whole thing this table
+        exists to prevent.
+        """
+        if not order_id or not mandate_id or not subject:
+            raise StateError("an order's authority needs an order, a mandate and a subject")
+        now = self._now(clock)
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO orders (order_id, mandate_id, subject, session_id, at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (order_id, mandate_id, subject, session_id, now),
+            )
+
+    def link_payment(self, payment_id: str, order_id: str, *, clock: Clock | None = None) -> None:
+        """Attach a provider payment to the order it settled.
+
+        The link arrives from the provider -- in a webhook, or on a fetch -- because it is
+        created when a human authenticates at Checkout. An agent cannot manufacture it,
+        which is exactly why the graph is worth checking.
+        """
+        if not payment_id or not order_id:
+            raise StateError("linking a payment needs both a payment and an order")
+        now = self._now(clock)
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO payments (payment_id, order_id, at) VALUES (?, ?, ?)",
+                (payment_id, order_id, now),
+            )
+
+    def authority_for(self, payment_id: str) -> Authority | None:
+        """Who a payment belongs to, or ``None`` if this system never saw it created.
+
+        ``None`` is the answer that matters. A payment with no recorded origin is not a
+        payment this service has any business capturing or refunding, and the gate reads
+        the absence as a refusal rather than as permission.
+        """
+        if not payment_id:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT o.order_id, o.mandate_id, o.subject, o.session_id "
+                "FROM payments p JOIN orders o ON o.order_id = p.order_id "
+                "WHERE p.payment_id = ?",
+                (payment_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return Authority(
+            order_id=str(row[0]),
+            mandate_id=str(row[1]),
+            subject=str(row[2]),
+            session_id=str(row[3]),
+        )
 
     def daily_refund_total(self, epoch: int) -> int:
         return self._sum_ledger("ist_day = ? AND kind = 'refund'", (self._ist_day(epoch),))

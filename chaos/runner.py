@@ -96,20 +96,27 @@ class Stack:
         return self.handler.moved
 
 
-def _authorised_payment(rail: SimRail) -> str:
-    """Checkout, up to the point where the webhooks take over."""
+def _authorised_payment(rail: SimRail) -> tuple[str, str]:
+    """Checkout, up to the point where the webhooks take over.
+
+    Returns the order and the payment, not just the payment. The gate now walks
+    ``payment -> order -> mandate, subject`` before it will capture or refund anything, so
+    a scenario that produced a payment out of nowhere would be refused at
+    ``payment.unknown_origin`` -- correctly. This is the *legitimate* half of that story
+    and it has to carry its own paperwork.
+    """
     order = rail.create_order(
         amount=CAPTURE, currency="INR", receipt="rcpt_chaos", idempotency_key="setup:order"
     )
     payment = rail.pay_order(
         order_id=order.order_id, method=PAYMENT_METHOD, idempotency_key="setup:pay"
     )
-    return payment.payment_id
+    return order.order_id, payment.payment_id
 
 
 def naive_stack(seed: str, *, lossy: bool = False) -> Stack:
     rail = SimRail(seed=seed)
-    payment_id = _authorised_payment(rail)
+    _, payment_id = _authorised_payment(rail)
     handler = NaiveHandler(rail=LossyRail(rail, lose_first=LOST_RESPONSES) if lossy else rail)
     return Stack(handler=handler, rail=rail, payment_id=payment_id)
 
@@ -118,7 +125,7 @@ def gated_stack(seed: str, *, lossy: bool = False) -> Stack:
     clock = FrozenClock.at_ist(CHAOS_CLOCK)
     signer = MandateSigner(generate_keypair()[0])
     rail = SimRail(seed=seed)
-    payment_id = _authorised_payment(rail)
+    order_id, payment_id = _authorised_payment(rail)
 
     mandate = IntentMandate.create(
         clock=clock,
@@ -139,6 +146,20 @@ def gated_stack(seed: str, *, lossy: bool = False) -> Stack:
         verifier=signer.verifier(),
         clock=clock,
     )
+    # The authority graph for a checkout that happened before this handler existed. In a
+    # deployment PayNaka creates the order itself and learns the payment id from a webhook;
+    # here the scenario starts mid-lifecycle, so the same two facts are recorded explicitly
+    # rather than assumed. Recording them is the point: without them the gate refuses, and
+    # it should.
+    naka.state.record_order(
+        order_id,
+        mandate_id=mandate.mandate_id,
+        subject=mandate.subject,
+        session_id=mandate.session_id,
+        clock=clock,
+    )
+    naka.state.link_payment(payment_id, order_id, clock=clock)
+
     handler = GatedHandler(naka=naka, signed=signer.sign(mandate), clock=clock)
     return Stack(handler=handler, rail=rail, payment_id=payment_id)
 

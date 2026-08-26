@@ -411,7 +411,7 @@ class PayNaka:
                 suppressed=suppressed,
             )
 
-        self._post(request, result)
+        self._post(request, mandate, result)
 
         # The second half of the idempotency claim. The key was taken before the rail was
         # called -- it has to be, or two copies of one request both find it free -- so a
@@ -661,12 +661,33 @@ class PayNaka:
             )
         raise RailError(f"no rail binding for action {action!r}")
 
-    def _post(self, request: MoneyRequest, result: Any) -> None:
+    def _post(self, request: MoneyRequest, mandate: IntentMandate, result: Any) -> None:
         """Update the ledger from what the rail confirmed, not from what was asked.
 
         They differ on a partial capture, and taking the request's word for it is how a
         ledger silently drifts away from reality.
         """
+        # The authority graph, written as it is learned. An order records the mandate and
+        # shopper behind it; a payment records the order it settled. Later capture and
+        # refund requests name only a payment id, and `check_payment_authority` walks back
+        # along these two links to ask whose money it is -- a question the balance
+        # arithmetic never asked, so a fresh refund-capable mandate could operate on any
+        # payment that happened to be in state.
+        order_id = str(getattr(result, "order_id", "") or "")
+        payment_id = str(getattr(result, "payment_id", "") or request.payment_id or "")
+        if request.action == "create_order" and order_id:
+            self.state.record_order(
+                order_id,
+                mandate_id=mandate.mandate_id,
+                subject=mandate.subject,
+                session_id=mandate.session_id,
+                clock=self.clock,
+            )
+        # A payment id arrives from the provider, after a human authenticated at Checkout.
+        # That is the step an agent cannot take, and the reason this link is worth having.
+        if payment_id and order_id:
+            self.state.link_payment(payment_id, order_id, clock=self.clock)
+
         confirmed = int(getattr(result, "amount", 0))
         if request.action == "create_refund":
             # The refund's ledger entry is written by settling the claim the gate took,

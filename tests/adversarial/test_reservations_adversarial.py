@@ -142,6 +142,18 @@ def _naka(
         verifier=signer.verifier(),
         clock=clock,
     )
+    # The payment these tests refund has to have somewhere to have come from: the gate
+    # walks payment -> order -> mandate before it looks at any balance. Recorded here
+    # rather than in the `state` fixture because the mandate is built here, and the
+    # subject on it is what the check compares against.
+    state.record_order(
+        "order_for_pay_1",
+        mandate_id=mandate.mandate_id,
+        subject=mandate.subject,
+        session_id=mandate.session_id,
+        clock=clock,
+    )
+    state.link_payment("pay_1", "order_for_pay_1", clock=clock)
     return naka, signer.sign(mandate)
 
 
@@ -241,6 +253,18 @@ class TestEngineResolvesTheClaim:
         rail.capture_payment(payment_id=payment.payment_id, amount=CAPTURED, idempotency_key="c")
         state.record_capture(payment.payment_id, CAPTURED)
         state.record_return(payment.payment_id)
+        # The paperwork a real order leaves behind. Without it the gate stops at
+        # payment.unknown_origin before any of the reservation logic runs -- which is the
+        # correct answer to "refund a payment that came from nowhere", and not the question
+        # this test is asking.
+        state.record_order(
+            order.order_id,
+            mandate_id=signed.mandate.mandate_id,
+            subject=signed.mandate.subject,
+            session_id=signed.mandate.session_id,
+            clock=clock,
+        )
+        state.link_payment(payment.payment_id, order.order_id, clock=clock)
 
         request = MoneyRequest(
             action="create_refund",

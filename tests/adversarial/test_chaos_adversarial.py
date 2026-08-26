@@ -146,10 +146,12 @@ class TestKeyReuse:
         )
         outcomes = deliver_in_order(stack.handler.handle, [swapped])
 
-        # Nothing was ever captured on the substituted payment, so the ledger refuses it
-        # before idempotency is consulted. Two independent reasons to say no is the
-        # intended shape; the one that matters is that the money stayed put.
-        assert outcomes[0].check_id == "refund.exceeds_capture"
+        # Three independent reasons to say no now, and the strongest one answers first:
+        # the substituted payment was never created under an order this checkpoint issued,
+        # so it is refused on authority rather than on arithmetic. Nothing was captured on
+        # it either, and the idempotency key was already spent. The one that matters is
+        # that the money stayed put.
+        assert outcomes[0].check_id == "payment.unknown_origin"
         assert not outcomes[0].acted
         assert stack.rail.fetch_payment(other.payment_id).raw.get("refunded", 0) == 0
         assert stack.refunded_on_the_rail() == ENTITLED

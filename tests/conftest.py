@@ -235,3 +235,34 @@ def _committed_evidence_is_read_only() -> Iterator[None]:
         + ". These files are outputs of named commands a reader re-runs, not scratch space. "
         "Point the test at tmp_path."
     )
+
+
+def authorise_payment(
+    state: SqliteState,
+    mandate: IntentMandate,
+    payment_id: str,
+    amount: int,
+    *,
+    order_id: str | None = None,
+) -> str:
+    """Seed a captured payment that has somewhere to have come from.
+
+    The gate walks ``payment -> order -> mandate, subject`` before it will capture or
+    refund anything, so a test that conjured a payment id and called ``record_capture``
+    now gets ``payment.unknown_origin`` -- correctly, and unhelpfully, because it would
+    mask the check the test is actually about.
+
+    This is what a real lifecycle leaves behind: an order recorded when the rail confirmed
+    it, a payment linked when the provider reported it, and a capture on the ledger. Tests
+    that mean to attack the graph skip this and seed nothing, which is the point.
+    """
+    order = order_id or f"order_for_{payment_id}"
+    state.record_order(
+        order,
+        mandate_id=mandate.mandate_id,
+        subject=mandate.subject,
+        session_id=mandate.session_id,
+    )
+    state.link_payment(payment_id, order)
+    state.record_capture(payment_id, amount)
+    return order

@@ -153,6 +153,10 @@ class TestLedgerTruth:
         payment = rail.pay_order(
             order_id=created.rail_result.order_id, method="upi", idempotency_key="p"
         )
+        # The order was created through the engine, so its authority is already recorded.
+        # The payment id is not: it comes back from the provider after checkout, which in
+        # a deployment arrives in a webhook and here is done straight on the rail.
+        state.link_payment(payment.payment_id, created.rail_result.order_id)
         capture_mandate_holder = naka
         capture = MoneyRequest(
             action="capture_payment",
@@ -209,6 +213,16 @@ class TestRailFailures:
             amount=AUTHORISED,
             payment_id="pay_nonexistent",
         )
+        # Known to us, unknown to the rail. That is the shape this test needs: the point
+        # is a rail failure, and a gate refusal at payment.unknown_origin would mean the
+        # request never got far enough to have one.
+        naka.state.record_order(
+            "order_pay_nonexistent",
+            mandate_id=signed.mandate.mandate_id,
+            subject=signed.mandate.subject,
+            session_id=signed.mandate.session_id,
+        )
+        naka.state.link_payment("pay_nonexistent", "order_pay_nonexistent")
         result = naka.execute(payment_attempt, signed)
         assert not result.executed
         assert result.money_moved == 0
@@ -224,6 +238,16 @@ class TestRailFailures:
             amount=AUTHORISED,
             payment_id="pay_does_not_exist",
         )
+        # Known to us, unknown to the rail. That is the shape this test needs: the point
+        # is a rail failure, and a gate refusal at payment.unknown_origin would mean the
+        # request never got far enough to have one.
+        naka.state.record_order(
+            "order_pay_does_not_exist",
+            mandate_id=signed.mandate.mandate_id,
+            subject=signed.mandate.subject,
+            session_id=signed.mandate.session_id,
+        )
+        naka.state.link_payment("pay_does_not_exist", "order_pay_does_not_exist")
         naka.execute(bad, signed)
         kinds = [r.payload["kind"] for r in audit.records()]
         assert "rail.indeterminate" in kinds or "rail.declined" in kinds
