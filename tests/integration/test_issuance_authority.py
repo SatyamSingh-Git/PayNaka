@@ -211,3 +211,114 @@ class TestTheThreeRolesStaySeparate:
         assert len(shoppers) == 0
         with pytest.raises(Exception, match="no valid bearer credential"):
             shoppers.authenticate(f"Bearer {SHOPPER_TOKEN}")
+
+
+class TestTheBodyIsParsedStrictly:
+    """Authority is created here, and JSON has more shapes than these fields do.
+
+    `bool("false")` is `True`. A body carrying the *string* "false" for `allow_refunds`
+    therefore granted refund authority -- a quoting mistake in a client, silently upgraded
+    into permission to move money out of an account. An audit reproduced it.
+
+    Nothing is coerced now. Every field is the type it claims or the request is a 400.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        ["false", "true", "0", "1", 0, 1, [], None],
+        ids=["str-false", "str-true", "str-0", "str-1", "int-0", "int-1", "list", "null"],
+    )
+    def test_only_a_real_boolean_can_grant_refunds(self, client: TestClient, value: object) -> None:
+        response = client.post(
+            "/api/intent", headers=AS_SHOPPER, json={**INTENT, "allow_refunds": value}
+        )
+        assert response.status_code == 400, f"{value!r} was accepted as a boolean"
+        assert "true or false" in response.json()["detail"]
+
+    def test_a_real_boolean_still_works(self, client: TestClient) -> None:
+        """The other direction. A parser that refuses everything refuses the honest caller
+        too, and this field has to remain usable."""
+        response = client.post(
+            "/api/intent", headers=AS_SHOPPER, json={**INTENT, "allow_refunds": True}
+        )
+        assert response.status_code == 200
+        assert "create_refund" in response.json()["signed"]["mandate"]["allowed_actions"]
+
+    def test_refunds_stay_off_by_default(self, client: TestClient) -> None:
+        body = client.post("/api/intent", headers=AS_SHOPPER, json={**INTENT}).json()
+        assert "create_refund" not in body["signed"]["mandate"]["allowed_actions"]
+
+    @pytest.mark.parametrize("field", ["budget_paise", "max_qty_per_sku", "ttl_seconds"])
+    @pytest.mark.parametrize(
+        "value", ["199900", 1999.0, True, None, []], ids=["str", "float", "bool", "null", "list"]
+    )
+    def test_numbers_are_not_coerced(self, client: TestClient, field: str, value: object) -> None:
+        """`int("199900")` works and `int(1999.9)` truncates. Both are a value that looked
+        close enough and was not the thing, on a path that decides how much may be spent."""
+        response = client.post("/api/intent", headers=AS_SHOPPER, json={**INTENT, field: value})
+        assert response.status_code == 400, f"{field}={value!r} was accepted"
+
+    def test_a_bare_string_is_not_a_list_of_skus(self, client: TestClient) -> None:
+        """The one worth naming: `tuple("ATTA-5KG")` is twenty-one single-character SKUs,
+        none of which exist, and the mandate would have been issued over them."""
+        response = client.post(
+            "/api/intent", headers=AS_SHOPPER, json={**INTENT, "skus": "ATTA-5KG"}
+        )
+        assert response.status_code == 400
+        assert "list of strings" in response.json()["detail"]
+
+    def test_a_list_with_a_non_string_in_it_is_refused(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/intent", headers=AS_SHOPPER, json={**INTENT, "skus": ["ATTA-5KG", 5]}
+        )
+        assert response.status_code == 400
+
+
+class TestReferencePricesReachTheMandate:
+    """The bound that stops the attack this project leads with -- a merchant repricing
+    between the agent reading a page and paying for it -- existed on `ShopperIntent` and
+    was never read here. The check was live and unreachable, which is the same as absent
+    for anybody using the API.
+    """
+
+    def test_a_reference_price_is_carried_into_the_signed_mandate(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/intent",
+            headers=AS_SHOPPER,
+            json={**INTENT, "reference_prices": {"ATTA-5KG": 199_900}},
+        )
+        assert response.status_code == 200, response.text
+        mandate = response.json()["signed"]["mandate"]
+        assert mandate["reference_prices"], "the price the shopper was shown was dropped"
+
+    def test_a_tolerance_is_carried_too(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/intent",
+            headers=AS_SHOPPER,
+            json={
+                **INTENT,
+                "reference_prices": {"ATTA-5KG": 199_900},
+                "price_tolerance_bps": 50,
+            },
+        )
+        assert response.json()["signed"]["mandate"]["price_tolerance_bps"] == 50
+
+    @pytest.mark.parametrize(
+        "prices",
+        [{"ATTA-5KG": "199900"}, {"ATTA-5KG": 1999.0}, {"ATTA-5KG": True}, ["ATTA-5KG"], "x"],
+        ids=["str-paise", "float-paise", "bool-paise", "list", "string"],
+    )
+    def test_a_malformed_reference_price_is_refused(
+        self, client: TestClient, prices: object
+    ) -> None:
+        """Money crosses every boundary as int paise. A rupee string here would bound the
+        price at a hundredth of what the shopper saw, or a hundred times it."""
+        response = client.post(
+            "/api/intent", headers=AS_SHOPPER, json={**INTENT, "reference_prices": prices}
+        )
+        assert response.status_code == 400
+
+    def test_omitting_them_is_still_allowed(self, client: TestClient) -> None:
+        """Not every shopper was shown a per-item price. The budget still bounds the
+        basket, and requiring this would break the simple case."""
+        assert client.post("/api/intent", headers=AS_SHOPPER, json={**INTENT}).status_code == 200

@@ -522,6 +522,71 @@ def decide(escalation_id: str, answer: str, request: Request) -> dict[str, Any]:
     return {**escalation.to_dict(), "amount_formatted": format_inr(escalation.amount)}
 
 
+# ---------------------------------------------------------------- intent parsing
+#
+# Strict, because this is where authority is created and JSON has more shapes than the
+# fields do. `bool("false")` is `True`, so a body carrying the *string* "false" for
+# `allow_refunds` granted refund authority -- a quoting mistake in a client, silently
+# upgraded into permission to move money out. `int("3")` and `int(3.9)` are the same class
+# of accident: a value that looks close enough and is not the thing.
+#
+# So every field is the type it claims or the request is a 400. Nothing is coerced, and the
+# message names the field and what arrived, because the caller is a person building a
+# client and the alternative is them guessing.
+
+
+def _as_int(body: dict[str, Any], name: str, default: int | None = None) -> int:
+    value = body.get(name, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be a whole number, got {type(value).__name__}: {value!r}")
+    return value
+
+
+def _as_bool(body: dict[str, Any], name: str, default: bool) -> bool:
+    value = body.get(name, default)
+    if not isinstance(value, bool):
+        raise ValueError(
+            f"{name} must be true or false, got {type(value).__name__}: {value!r}. "
+            f'A quoted "false" is a string, and every non-empty string is true.'
+        )
+    return value
+
+
+def _as_strings(body: dict[str, Any], name: str) -> tuple[str, ...]:
+    value = body.get(name, ())
+    if isinstance(value, str) or not isinstance(value, (list, tuple)):
+        # A bare string is the interesting case: tuple("ATTA-5KG") is twenty-one
+        # single-character SKUs, none of which exist, and the mandate would be issued.
+        raise ValueError(f"{name} must be a list of strings, got {type(value).__name__}")
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{name} must contain only strings, found {type(item).__name__}")
+    return tuple(value)
+
+
+def _as_reference_prices(body: dict[str, Any]) -> tuple[tuple[str, int], ...]:
+    """The price the shopper was shown, per SKU: ``{"ATTA-5KG": 199900}``.
+
+    This route did not read this field at all, so a mandate issued over HTTP could not
+    carry the one bound that stops the attack this project leads with -- a merchant
+    repricing between the agent reading a page and paying for it. The check existed and
+    was unreachable, which is the same as not existing for anybody using the API.
+    """
+    value = body.get("reference_prices", {})
+    if not isinstance(value, dict):
+        raise ValueError("reference_prices must be an object of sku -> paise")
+    prices: list[tuple[str, int]] = []
+    for sku, paise in value.items():
+        if not isinstance(sku, str):
+            raise ValueError("reference_prices keys must be SKU strings")
+        if isinstance(paise, bool) or not isinstance(paise, int):
+            raise ValueError(
+                f"reference price for {sku!r} must be int paise, got {type(paise).__name__}"
+            )
+        prices.append((sku, paise))
+    return tuple(prices)
+
+
 @app.post("/api/intent")
 def freeze_intent(intent: dict[str, Any], request: Request) -> dict[str, Any]:
     """Turn a shopper's stated intent into a signed mandate. The start of every trip.
@@ -565,12 +630,14 @@ def freeze_intent(intent: dict[str, Any], request: Request) -> dict[str, Any]:
         stated = ShopperIntent(
             subject=caller.name,
             session_id=str(intent.get("session_id", "")),
-            budget_paise=intent.get("budget_paise"),  # type: ignore[arg-type]
-            skus=tuple(intent.get("skus", ())),
-            destinations=tuple(intent.get("destinations", ())),
-            max_qty_per_sku=int(intent.get("max_qty_per_sku", 1)),
-            ttl_seconds=int(intent.get("ttl_seconds", 900)),
-            allow_refunds=bool(intent.get("allow_refunds", False)),
+            budget_paise=_as_int(intent, "budget_paise"),
+            skus=_as_strings(intent, "skus"),
+            destinations=_as_strings(intent, "destinations"),
+            max_qty_per_sku=_as_int(intent, "max_qty_per_sku", 1),
+            ttl_seconds=_as_int(intent, "ttl_seconds", 900),
+            allow_refunds=_as_bool(intent, "allow_refunds", False),
+            reference_prices=_as_reference_prices(intent),
+            price_tolerance_bps=_as_int(intent, "price_tolerance_bps", 0),
         )
         issued = hub.issuer.issue(stated, clock=hub.clock)
     except (IssuerError, TypeError, ValueError) as exc:
@@ -658,6 +725,22 @@ async def razorpay_webhook(request: Request) -> dict[str, Any]:
                 "applied": None,
                 **event.to_dict(),
             }
+
+    # The provider's half of the authority graph. PayNaka records an order's mandate and
+    # subject when it creates the order; the payment id exists only after a human
+    # authenticates at Checkout, so it can arrive no earlier than this and from nowhere
+    # else. Written for any event carrying both ids, not just a capture -- an
+    # authorisation usually reaches us first, and waiting for the capture would leave a
+    # window where the payment has no origin.
+    #
+    # This was missing, and the consequence was worse than a gap: the capture landed on
+    # the ledger, the payment stayed an orphan, and the next legitimate refund on it was
+    # refused as payment.unknown_origin. A containment check that also blocks the normal
+    # path is not containment; it is an outage, and it is how a security control ends up
+    # deleted six weeks later. It is written after the signature check, like everything
+    # else here, so a payload anyone can post cannot attach a payment to an order.
+    if event.payment_id and event.order_id:
+        hub.naka.state.link_payment(event.payment_id, event.order_id, clock=hub.clock)
 
     applied: str | None = None
     if event.event == "payment.captured" and event.payment_id and event.amount:
