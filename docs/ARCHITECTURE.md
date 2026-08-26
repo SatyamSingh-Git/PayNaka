@@ -50,7 +50,7 @@ That is the difference between "we made it harder" and "the action is not availa
 | `paynaka/money.py` | integer paise, nothing else | floats are refused, not rounded |
 | `paynaka/clock.py` | injectable time | RBI/NPCI windows are testable at any hour |
 | `paynaka/mandate.py` | signed statement of intent | canonical bytes, domain separation, strict parsing |
-| `paynaka/state.py` | nonces, idempotency, ledger, counters | atomic claims, never read-then-write |
+| `paynaka/state.py` | nonces, idempotency, ledger, the authority graph, counters | atomic claims, never read-then-write |
 | `paynaka/policy.py` | the merchant's envelope | unknown key = startup failure |
 | `paynaka/gate.py` | the checks | **imports no LLM SDK**, enforced by a test |
 | `paynaka/audit.py` | append-only hash chain | `verify()` names the exact broken record |
@@ -107,7 +107,7 @@ service uses -- is per-connection and therefore always two checkpoints.
 
 **What a shared database would change.** The statements translate directly: SQLite's
 `INSERT OR IGNORE`, `ON CONFLICT DO UPDATE` and guarded `UPDATE` all have PostgreSQL
-equivalents with the same atomicity, and the schema is nine plain tables. The number that
+equivalents with the same atomicity, and the schema is thirteen plain tables. The number that
 moves is latency, and `make latency` already says which one: the envelope checks cost
 **10 µs** and the full gate costs **1.0 ms**, so roughly 99% of a decision is the state
 store. A network round trip per claim is the cost to plan for -- not the checking, which is
@@ -162,6 +162,21 @@ key is what settles it.
 
 **The ledger records what the rail confirmed**, never what was requested. Those differ on
 a partial capture, and taking the request's word for it is how a ledger drifts.
+
+**A provider's captured *total* is not an event.** `record_capture` appends, which is right
+for something that happened once. Reading a payment back and appending what it reports is
+how one capture becomes two: it happened, on the real Razorpay lifecycle, and put ₹3,998 on
+the ledger for a ₹1,999 payment — after which every bound computed from that number was
+wrong in the permissive direction. `reconcile_capture` records the difference between the
+provider's total and ours. Webhook deliveries deduplicate on the provider's event id; a
+fetch has no event id, and neither does a reconciliation job reading balances back after an
+outage.
+
+**The authority graph answers "whose payment is this".** `orders` records the mandate,
+subject and session behind an order when PayNaka creates it. `payments` records the order a
+payment settled, learned from the provider after a person authenticated at Checkout. Capture
+and refund walk `payment → order → mandate` before any balance arithmetic, and a payment with
+no recorded origin is refused.
 
 **Idempotency replays rather than denies.** A duplicate webhook is not an attack, it is
 Tuesday. An identical retry returns the original result; the same key carrying a different

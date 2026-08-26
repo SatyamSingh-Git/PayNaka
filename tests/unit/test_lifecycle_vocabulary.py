@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -123,3 +124,41 @@ class TestThePublishedTablesDoNotOverstate:
         reviewer. It just had not taken its own advice. Both halves stay."""
         text = (ROOT / "README.md").read_text(encoding="utf-8")
         assert 'Calling order creation "money moved"' in text
+
+
+class TestTheDocsDescribeTheCodeTheyDocument:
+    """`docs/ARCHITECTURE.md` said the schema was nine plain tables. It was thirteen.
+
+    A number in prose is a claim, and a reviewer who counts is exactly the reviewer this
+    project is written for. Counted rather than trusted, so the next table added fails a
+    build here instead of a reader's arithmetic.
+    """
+
+    WORDS: ClassVar[dict[int, str]] = {
+        8: "eight",
+        9: "nine",
+        10: "ten",
+        11: "eleven",
+        12: "twelve",
+        13: "thirteen",
+        14: "fourteen",
+        15: "fifteen",
+        16: "sixteen",
+    }
+
+    def test_the_table_count_in_prose_matches_the_schema(self) -> None:
+        schema = (ROOT / "paynaka" / "state.py").read_text(encoding="utf-8")
+        tables = schema.count("CREATE TABLE IF NOT EXISTS")
+        assert tables in self.WORDS, f"{tables} tables; add the word to this test"
+
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        claimed = f"{self.WORDS[tables]} plain tables"
+        assert claimed in architecture, (
+            f"docs/ARCHITECTURE.md does not say {claimed!r}; the schema has {tables}"
+        )
+
+    def test_the_new_tables_are_documented_by_name(self) -> None:
+        """A count alone would pass while the graph went unexplained."""
+        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        assert "authority graph" in architecture
+        assert "reconcile_capture" in architecture

@@ -50,21 +50,40 @@ absent is worse than no scan.
 
 ### Development credentials
 
-Three credentials are *minted* rather than configured when nothing is set and the rail is
+Four credentials are *minted* rather than configured when nothing is set and the rail is
 the in-process simulator. They land in `var/`, which is gitignored:
 
 - `var/mandate_ed25519.key` — the mandate signing key
 - `var/dev-agent-token` — what the buying agent presents to `/mcp`
 - `var/dev-approver-token` — what an operator presents to approve a step-up
+- `var/dev-shopper-token` — what a shopper presents to `/api/intent` to create authority
 
 This is deliberately *not* a bypass. The check is always live; only the origin of the
 credential changes. The tempting alternative — verification that switches off when nothing
 is configured — is a bypass, and a bypass is what gets found. In front of a real rail
 nothing is minted and the service refuses to start without explicit configuration.
 
-The agent and approver sets are disjoint, and a name **or a token** appearing in both is a
-startup failure. The dangerous configuration is not two entries with the same label; it is
-one secret that opens two doors.
+### Three roles, and why the third one exists
+
+**agent** spends within a mandate · **approver** answers a step-up · **shopper** creates
+authority. All three sets are mutually disjoint, and a name **or a token** appearing in any
+two is a startup failure. The dangerous configuration is not two entries with the same
+label; it is one secret that opens two doors, which careful naming does not prevent.
+
+The shopper set is the sharpest of the three and it was added late, after an audit asked the
+best question anyone has asked about this project: **who is allowed to create the
+constraint?** The answer was *the constrained agent*. `/api/intent` authenticated against
+the agent registry, so a compromised buying agent needed no forged signature — it could ask
+this service for a genuine one over a mandate of its own design, with the budget and SKU list
+it chose, and the checkpoint downstream would verify it perfectly, because it was genuine.
+
+The subject is taken from the credential rather than the request body: a shopper creates
+authority over their own account and no other, and a body naming a different subject is a
+403 rather than a silent rewrite. An agent token presented here gets **401, not 403** — a
+403 would confirm the token is real and merely wrong for this route, which hands a prober
+half the answer. Unset in front of a real rail, the shopper registry is empty and an empty
+registry authenticates nobody, so an unconfigured production deployment issues no mandates
+at all rather than issuing them to whoever asks.
 
 ## The trust boundary
 

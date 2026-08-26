@@ -42,6 +42,30 @@ statement that was already signed when their payload did not exist.
 | Currency confusion | `$1,999` read as `₹1,999` | `envelope.currency` |
 | Replay / double charge | pay twice for one order | `idempotency.*` |
 | Undeclared items | skip the SKU allow-list by omitting itemisation | `envelope.items_undeclared` |
+| Someone else's payment | refund a payment this shopper never made | `payment.not_this_shopper` |
+| A payment from nowhere | act on an id typed into state, or invented | `payment.unknown_origin` |
+
+### Authority continuity: whose payment is this?
+
+Capture and refund name a `payment_id` and nothing else. Every check on those paths used to
+be arithmetic — is the amount inside the captured balance, is there a return on record — and
+all of it was right about the *amount* while never asking whose payment it was. A refund-
+capable mandate could therefore operate on any payment that had reached state.
+
+The gate now walks `payment → order → mandate, subject` before it looks at a balance. Orders
+record the mandate, subject and session behind them when PayNaka creates them; payments
+record the order they settled when the provider reports it — in a `payment.captured` webhook,
+or on a fetch. Two facts, learned at different times by different parties, so two tables.
+A payment with no recorded origin is refused, which is the fail-closed reading of "we have
+never seen this".
+
+**It binds the subject, not the mandate, and that is a decision rather than an oversight.**
+Binding `mandate_id` reads stronger and is wrong: a refund is a legitimate thing to do a week
+later, under a fresh mandate signed for exactly that purpose, long after the buying mandate
+expired. Refusing it means either refunds that cannot happen or purchase mandates kept alive
+for months. The subject is the containment property — authority over *this shopper's* money
+and nobody else's — and it holds under both. The mandate and session are recorded anyway, so
+the audit trail shows the whole chain even where only one link is enforced.
 
 ### Mandate forgery
 

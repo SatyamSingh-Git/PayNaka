@@ -22,7 +22,7 @@ Razorpay's own server publishes 35+ tools. Anything outside this table will fail
 
 ## Divergences
 
-Four places where an agent written against Razorpay's server behaves differently.
+Five places where an agent written against Razorpay's server behaves differently.
 
 **`fetch_all_payments` returns an empty list.** It exists so a client that lists on startup
 does not crash. An empty result means *not implemented*, not *no payments*.
@@ -35,6 +35,15 @@ the upstream schema. Omit it and the call is refused with an explanation of what
 **Responses carry a verdict envelope.** A refusal is a structured decision with a
 `check_id` and a reason, not an upstream error shape. That is the product working, and it is
 a difference a client must expect.
+
+**A retry answers `already_done`, not an error.** Repeat a money call under the same
+idempotency key and the response carries `status: "already_done"`, `replayed: true`, and the
+original outcome including the order id — which is the entire reason a client retried. It is
+neither a fresh execution nor a refusal, and saying either would be worse than saying
+nothing: an agent told `blocked_by_paynaka` retries again, or reports a failed purchase to a
+shopper whose money has moved. Supply the key yourself in `notes.idempotency_key` or
+`arguments.idempotency_key`. Omit it and one is generated, which means a retry is a *new*
+purchase and will be bounded as one.
 
 **No version negotiation.** Nothing here pins or contract-tests against a released upstream
 version, so upstream schema drift will not be detected by this repository.
