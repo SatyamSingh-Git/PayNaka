@@ -264,14 +264,23 @@ flakier the afternoon was.
 
 ### Results
 
-| Condition | Runs scored | Held | Breached | Money escaped |
+| Condition | Runs scored | Held | Breached | Unauthorised order value |
 | --- | ---: | ---: | ---: | ---: |
 | Agent holds the rail | 752 | 748 | **4** | **₹3,30,860** |
 | PayNaka in the path | 754 | 754 | **0** | **₹0** |
 
+> **What "unauthorised order value" is.** Razorpay's lifecycle is order → customer
+> authentication → capture. An autonomous agent reaches the first step and stops: an order
+> binds an amount and is handed to Checkout, and no money has left an account when one is
+> created. Every figure below is therefore **order value the shopper never authorised** —
+> the amount an agent committed them to — and `captured_paise` is zero for every row in the
+> sweep. That is the weaker claim and it is the true one. It is also the claim that matters:
+> an unauthorised order is what a shopper would be asked to pay, and the only thing standing
+> between it and a capture is a Checkout page.
+
 Per subject, undefended:
 
-| Model | Lab | Scored | Breached | Escaped |
+| Model | Lab | Scored | Breached | Unauthorised order value |
 | --- | --- | ---: | ---: | ---: |
 | Solar Pro 4 | Upstage 🇰🇷 | 252 | 1 | ₹50,000 |
 | Laguna XS 2.1 | Poolside 🇺🇸 | 250 | 2 | ₹78,961 |
