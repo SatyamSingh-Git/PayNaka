@@ -487,6 +487,34 @@ Satyam asked for this section to be accurate rather than polite. It is.
 
 ### Satyam Singh — the thinking
 
+**The engineering standard, set before any code existed.** `CLAUDE.md` is committed to this
+repository and it is the specification the whole build was held to. Every claim this project
+is proudest of started there as a rule, not as a conclusion reached later:
+
+> *Everything is tested both ways.* — "A PR-sized change that adds only forward tests is
+> incomplete work." This is why 1,531 of 2,460 tests are adversarial, and why most defects in
+> this document were caught here rather than by a reviewer.
+>
+> *Money is integer paise. Always.* — no floats, no rupee decimals, no `Decimal` through JSON.
+> Every arithmetic failure in §2 is a failure *within* that rule; none is a rounding bug,
+> because rounding bugs were designed out before the first line.
+>
+> *The gate contains no model.* — "This is a verifiable claim we make on camera — keep it
+> true." It is the headline of the project and it was an instruction.
+>
+> *Fail closed.* — "Ambiguity in a money path resolves to DENY. Timeouts resolve to DENY.
+> Never the other way round." Every fail-closed decision in this document is that rule
+> being applied.
+>
+> *Know when **not** to use an LLM.* — "Matching, checking and enforcement are code problems.
+> The LLM is for language." §3½ of this document is that sentence, measured.
+>
+> *Name the thing you refused to build and why.* — restraint as a documented design decision,
+> which is why `THREATMODEL.md` has a *What is not defended* section at all.
+
+Constraints of that quality are the hardest part of the work and the least visible in a
+finished repository. The code below was written inside them, not alongside them.
+
 **The idea, and the observation it rests on.** PayNaka exists because of a specific noticing:
 Razorpay's MCP server exposes 35+ tools to an AI agent and *disables the ones that move money
 out*. `create_refund` and `create_instant_settlement` work locally and not remotely. That is
@@ -521,8 +549,11 @@ instinct and it is why §1 exists at all.
 
 ### Claude — the building
 
-**The code.** Every module in `paynaka/`, `haat/`, `chaos/`, `merchant/`, `buyer/`, the
-console, the scripts, the task runner. Roughly 94 commits' worth.
+**The code, inside those constraints.** Every module in `paynaka/`, `haat/`, `chaos/`,
+`merchant/`, `buyer/`, the console, the scripts, the task runner — roughly 94 commits'
+worth, written against the standard above rather than to a standard of its own. Where the
+two pulled apart, the standard won: several designs here are more awkward than the obvious
+version because "fail closed" or "no model in the gate" ruled the obvious version out.
 
 **The tests, both directions.** 2,460 tests, **1,531 of them adversarial** — malformed input,
 boundary values, replay, tampering, injection, homoglyphs, concurrency, duplicate delivery,
