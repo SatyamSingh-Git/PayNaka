@@ -109,8 +109,11 @@ service uses -- is per-connection and therefore always two checkpoints.
 `INSERT OR IGNORE`, `ON CONFLICT DO UPDATE` and guarded `UPDATE` all have PostgreSQL
 equivalents with the same atomicity, and the schema is thirteen plain tables. The number that
 moves is latency, and `make latency` already says which one: the envelope checks cost
-**10 µs** and the full gate costs **1.0 ms**, so roughly 99% of a decision is the state
-store. A network round trip per claim is the cost to plan for -- not the checking, which is
+**6 µs** at p50 and the full gate about **0.9 ms**, so roughly 99% of a decision is the
+state store. Both figures are p50, because that is the part that reproduces: across runs on
+one machine the median holds to within a few percent while p99 ranges from 1.5 ms to over
+3 ms depending on load. The *ratio* is the durable claim; the tail is a property of the
+afternoon. A network round trip per claim is the cost to plan for -- not the checking, which is
 free.
 
 ---

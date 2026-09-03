@@ -1,8 +1,9 @@
 # The five-minute pitch — shooting script
 
 > Everything to show, when to show it, and the words to say. Beats are timed to
-> [the cue cards](https://claude.ai/code/artifact/5abf3d70-3653-438e-a404-86897696bb5f),
-> which carry the same timecodes in their top rail.
+> [docs/cue-cards.html](cue-cards.html), which carries the same timecodes in its top rail.
+> Open it in a browser, press `F` for fullscreen and `H` to hide the chrome; `→` advances,
+> and `?still` on the URL freezes the entrances for a clean screenshot.
 
 **The speech budget is ~700 words.** A comfortable pace is 150 words a minute, and five
 minutes of content delivered in five minutes is already too fast. The script below is 690
@@ -26,7 +27,7 @@ Then have these open, in this order, on separate tabs or desktops:
 
 | # | What | Where |
 |---|---|---|
-| 1 | Cue cards, fullscreen, `H` pressed to hide the chrome | the artifact |
+| 1 | Cue cards, fullscreen, `H` pressed to hide the chrome | [docs/cue-cards.html](cue-cards.html) — open the local file, no network |
 | 2 | A clean terminal, 18–20pt, dark, cwd `e:\RazorPay` | — |
 | 3 | Razorpay dashboard, **already logged in**, on payment `pay_TUQNIPW6IXVwYe` | dashboard.razorpay.com |
 | 4 | Razorpay MCP docs, scrolled to the tool list | razorpay.com/docs |
@@ -163,9 +164,15 @@ grep -c "openai\|anthropic" paynaka/gate.py
 
 ### 4:05 · CARD 15 — latency
 
-> The mandate checks cost ten microseconds. The whole enforced path is one point four seven
-> milliseconds — one percent of a call to a payments API. A defence nobody will deploy is
-> not a defence.
+> The mandate checks cost six microseconds. The whole enforced path — gate, audit write,
+> ledger — is under a millisecond. Against a hundred-and-twenty-millisecond call to a
+> payments API, that is about one percent. A defence nobody will deploy is not a defence.
+
+> **Say p50 figures, never p99.** The median reproduces to within a few percent; the tail
+> ranged 1.5 ms to over 3 ms on one machine depending on load. The first draft of this
+> script had you saying "one point four seven milliseconds" over a screen that would have
+> shown three — which is the exact class of mistake this project spent a week removing from
+> its own documentation.
 
 ### 4:15 · SCREEN — `docs/WHAT_BROKE.md`, scrolling
 

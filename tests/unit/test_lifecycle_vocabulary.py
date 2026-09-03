@@ -151,11 +151,29 @@ class TestTheDocsDescribeTheCodeTheyDocument:
         tables = schema.count("CREATE TABLE IF NOT EXISTS")
         assert tables in self.WORDS, f"{tables} tables; add the word to this test"
 
-        architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         claimed = f"{self.WORDS[tables]} plain tables"
-        assert claimed in architecture, (
-            f"docs/ARCHITECTURE.md does not say {claimed!r}; the schema has {tables}"
-        )
+        # Both documents make the claim, and only one of them was checked -- so the README
+        # still said "nine" for a week after ARCHITECTURE.md was corrected. A guard that
+        # covers one of two copies is a guard that finds the copy nobody reads.
+        for document in ("docs/ARCHITECTURE.md", "README.md"):
+            text = (ROOT / document).read_text(encoding="utf-8")
+            assert claimed in text, f"{document} does not say {claimed!r}; the schema has {tables}"
+
+    def test_quoted_latency_is_the_percentile_that_reproduces(self) -> None:
+        """`make latency` prints p50 and p99. The median holds to within a few percent
+        across runs; p99 ranged 1.5 ms to over 3 ms on one machine depending on load.
+
+        A p99 figure copied into prose is a number a reviewer's own run will contradict --
+        and it nearly went into the pitch script, where it would have been said aloud over
+        a screen showing something else."""
+        for document in ("README.md", "docs/ARCHITECTURE.md"):
+            text = (ROOT / document).read_text(encoding="utf-8")
+            if "µs" not in text:
+                continue
+            assert "p50" in text, (
+                f"{document} quotes a latency without naming the percentile; only p50 "
+                f"reproduces across runs"
+            )
 
     def test_the_new_tables_are_documented_by_name(self) -> None:
         """A count alone would pass while the graph went unexplained."""

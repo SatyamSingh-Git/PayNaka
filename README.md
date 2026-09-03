@@ -983,9 +983,11 @@ that; it is what the deployment is. The test file asserts it too, so it is never
 for a bug.
 
 Moving to Postgres translates directly — `INSERT OR IGNORE`, `ON CONFLICT DO UPDATE` and a
-guarded `UPDATE` all have equivalents with the same atomicity, over nine plain tables. The
+guarded `UPDATE` all have equivalents with the same atomicity, over thirteen plain tables. The
 number that moves is latency, and the section above already says which one: the checks cost
-10 µs, the state store costs the other 99% of a decision.
+**6 µs** at p50, the state store costs the other ~99% of a decision. Quoted at p50 on
+purpose — the tail moves with whatever else the machine is doing, and a p99 figure copied
+into prose is a number a reviewer's own run will contradict.
 
 ## Watching it
 
@@ -1052,6 +1054,7 @@ Every term this README uses that is not ordinary English, in the order you meet 
 | Document | Contents |
 | -------- | -------- |
 | [PITCH.md](docs/PITCH.md) | the five-minute pitch as a shot-by-shot script: what to show, when, and the words to say |
+| [cue-cards.html](docs/cue-cards.html) | the presenter deck those beats are timed to — open in a browser, `F` fullscreen, `→` to advance |
 | [WHAT_BROKE.md](docs/WHAT_BROKE.md) | **every failure this project had**, what caused each, what we did about it — including the ones a fix introduced |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | trust boundary, components, the decision pipeline, why the credential split is the whole idea |
 | [EXPERIMENT.md](docs/EXPERIMENT.md) | the full experimental report: 1,512 runs, method, per-family results, threats to validity |
