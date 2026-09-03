@@ -19,8 +19,8 @@
   --rule-firm:  #B6C9DC;
   --stone:      #5B7186;
   --ink:        #0B2545;
-  --signal:     #3395FF;
-  --signal-ink: #1E6FD9;
+  --signal:     #1668D9;
+  --signal-ink: #0F4CA8;
   --deny:       #CE3B2B;
   --held:       #17805A;
 
@@ -264,7 +264,7 @@ body {
   border: 2px solid var(--signal);
   padding: 1.6vh 1.9vw;
   margin-top: 1vh;
-  background: rgba(51, 149, 255, 0.06);
+  background: rgba(22, 104, 217, 0.055);
 }
 .counter em { font-style: normal; color: var(--signal); }
 
@@ -778,8 +778,8 @@ the frozen intent</span></div>
       ctx.moveTo(0, row.y);
       ctx.lineTo(W, row.y);
       ctx.strokeStyle = glow > 0.02
-        ? "rgba(51, 149, 255, " + (0.10 + glow * 0.34).toFixed(3) + ")"
-        : "rgba(11, 37, 69, 0.055)";
+        ? "rgba(22, 104, 217, " + (0.13 + glow * 0.38).toFixed(3) + ")"
+        : "rgba(22, 104, 217, 0.095)";
       ctx.lineWidth = 1;
       ctx.stroke();
     }
