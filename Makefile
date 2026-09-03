@@ -59,10 +59,7 @@ check: lint types test secrets ## everything CI runs
 # ------------------------------------------------------------------ run
 .PHONY: dev
 dev: console-data approver-token ## merchant :8001 + paynaka :8002 + console :5173
-	@echo starting merchant :8001, paynaka :8002, console :5173
-	@$(PY) uvicorn merchant.app:app --port 8001 --reload & \
-	 $(PY) uvicorn paynaka.app:app  --port 8002 --reload & \
-	 cd console && npm run dev
+	$(PY) python -m scripts.dev
 
 .PHONY: merchant
 merchant: ## merchant service only

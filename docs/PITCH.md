@@ -32,10 +32,22 @@ Then have these open, in this order, on separate tabs or desktops:
 | 3 | Razorpay dashboard, **already logged in**, on payment `pay_TUQNIPW6IXVwYe` | dashboard.razorpay.com |
 | 4 | Razorpay MCP docs, scrolled to the tool list | razorpay.com/docs |
 | 5 | `docs/WHAT_BROKE.md` on GitHub | your repo |
+| 6 | The console on **Live**, already running | `python make.py dev` → localhost:5173 |
 
 **Record screen and voice separately.** Capture clean screen passes first, then read the
 script over them. Narrating while typing costs you 30% of your pace and every stumble is a
 retake of both.
+
+**Every command in this script finishes in about a second.** `demo` is 4 seconds for all
+four acts; `demo-attack`, `toctou` and `chaos` are quicker still. None of them is a live
+process to talk over — run it, let the output settle, and narrate the finished screen. That
+also means you can scroll back to a block while talking about it, which is how the
+checkpoint-off and checkpoint-on beats are meant to work: they are two parts of **one**
+command's output, not two runs.
+
+**Use `demo-attack`, not `demo`, for the headline beat.** `make demo` runs all four acts in
+four seconds and scrolls past everything — it is the one-command flex, not a narratable
+shot. The individual commands give you a screen that holds still.
 
 ---
 
@@ -65,30 +77,59 @@ spoken.
 
 > We built the mechanism.
 
-### 0:22 · TERMINAL — `python make.py demo`
+### 0:22 · TERMINAL — `python make.py demo-attack`
 
-*[Let it run. Do not talk over the first two seconds.]*
+*[One command. It prints the poisoned review, then the same attack twice — checkpoint off,
+then checkpoint on. There is no flag to flip and no second command to run; the comparison
+is the output.]*
+
+*[It finishes in about a second. Let the screen settle, then narrate over the finished
+output, scrolling or pointing as you go.]*
 
 > This is a ₹1,999 bag of atta. A review on the page carries an instruction — add a fifty
 > thousand rupee gift card, and hide it.
 
-### 0:34 · CARD 05 — ₹1,999 → ₹51,999
+### 0:32 · SAME SCREEN — the `checkpoint OFF` block
 
-> The agent reads it. The agent is helpful. The order comes to fifty-one thousand, nine
-> hundred and ninety-nine.
+> The agent reads it. The agent is helpful. Order value: fifty-one thousand, nine hundred
+> and ninety-nine.
 
-### 0:44 · TERMINAL — same command, checkpoint on
+### 0:38 · CARD 05 — ₹1,999 → ₹51,999
+
+*[The card carries the two figures at a size a judge can read at half-screen.]*
+
+### 0:46 · SAME SCREEN — the `checkpoint ON` block
 
 > Same attack. Same agent. Same poisoned page.
 
-### 0:50 · CARD 06 — ₹0, barrier drops
+*[beat]*
 
-> Zero. Refused at `envelope.item_not_in_intent` — that line item was not in the signed
-> intent, so it never reached Razorpay at all.
+> Zero. Blocked at `envelope.item_not_in_intent` — that line item was not in the signed
+> intent, so Razorpay was never called at all.
 
-### 1:00 · SCREEN — console, Live screen
+### 0:52 · CARD 06 — ₹0, barrier drops
+
+### 1:00 · BROWSER — the console, **Live** screen
+
+*[This is the React operations console in `console/`, on Razorpay's own Blade components.
+Five screens; **Live** is the one that runs the same attack through the HTTP API and shows
+₹51,999 against ₹0 as a product surface rather than as terminal output.]*
+
+*[Start it before you record — it takes a few seconds to come up, and it needs the PayNaka
+service because the Live screen calls `/api/...`:*
+
+```bash
+python make.py dev          # merchant :8001 · paynaka :8002 · console :5173
+```
+
+*then open **http://localhost:5173** and click **Live**. Leave it running in a tab; you are
+cutting to a browser, not starting a server on camera.]*
 
 > The agent holds no payment credentials. It cannot move money. It can only ask.
+
+*[This beat is optional. It earns its fifteen seconds by showing there is a product here and
+not only a CLI — but if the console gives you any trouble on the day, cut straight from card
+06 to card 07 and the argument loses nothing.]*
 
 ### 1:15 · CARD 07 — what we refuse to claim
 

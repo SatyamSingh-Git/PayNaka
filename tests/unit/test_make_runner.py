@@ -211,7 +211,13 @@ class TestRecipesRunOnWindowsToo:
         """`|| true` printed "'true' is not recognized" and made `audit-verify` exit 1 -- a
         task whose whole job is to show a *deliberate* failure being detected, reporting a
         real one instead. `-` is make's own ignore-failure prefix and works on both."""
-        posix_only = ("|| true", "command -v", "&& true")
+        # ` & ` is POSIX backgrounding. In cmd.exe it is a command *separator*, so
+        # `a & b & c` runs a, blocks on it, and never reaches b or c -- which is exactly
+        # what `make dev` did on Windows: it started the merchant and the console it was
+        # supposed to serve never came up. Three of these were found by a reader's
+        # PowerShell before the guard existed; this is the fourth, found because the guard
+        # only listed the three that had already gone wrong.
+        posix_only = ("|| true", "command -v", "&& true", " & ", "& \\")
         offenders = [
             line.strip()
             for line in MAKEFILE_TEXT.splitlines()
