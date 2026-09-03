@@ -1051,6 +1051,7 @@ Every term this README uses that is not ordinary English, in the order you meet 
 
 | Document | Contents |
 | -------- | -------- |
+| [PITCH.md](docs/PITCH.md) | the five-minute pitch as a shot-by-shot script: what to show, when, and the words to say |
 | [WHAT_BROKE.md](docs/WHAT_BROKE.md) | **every failure this project had**, what caused each, what we did about it — including the ones a fix introduced |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | trust boundary, components, the decision pipeline, why the credential split is the whole idea |
 | [EXPERIMENT.md](docs/EXPERIMENT.md) | the full experimental report: 1,512 runs, method, per-family results, threats to validity |
