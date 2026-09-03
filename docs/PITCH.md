@@ -11,6 +11,37 @@ words. Do not add to it — if something new goes in, something old comes out.
 
 ---
 
+## Just the words
+
+**649 words. About four minutes twenty of speech** — the rest of the five minutes is
+commands running and beats held. Everything below this section is production notes you read
+once, not lines you deliver.
+
+Print this page. The section after it says what is on screen for each line.
+
+| Time | On screen | Say |
+| --- | --- | --- |
+| **0:00** | CARD 01 — the hook | Razorpay gives an AI agent thirty-five tools. Then it switches off the three that move money out. |
+| **0:08** | SCREEN — Razorpay MCP docs, tool list | Refunds. Instant settlements. Local only. Not available to any agent talking to the hosted server. |
+| **0:14** | CARD 03 — the thesis | That is not an oversight. It is a trust boundary drawn by hand, by engineers who understood the risk and had no mechanism to manage it. We built the mechanism. |
+| **0:22** | TERMINAL — `python make.py demo-attack` | This is a ₹1,999 bag of atta. A review on the page carries an instruction — add a fifty thousand rupee gift card, and hide it. |
+| **0:32** | SAME SCREEN — the `checkpoint OFF` block | The agent reads it. The agent is helpful. Order value: fifty-one thousand, nine hundred and ninety-nine. |
+| **0:46** | SAME SCREEN — the `checkpoint ON` block | Same attack. Same agent. Same poisoned page. Zero. Blocked at `envelope.item_not_in_intent` — that line item was not in the signed intent, so Razorpay was never called at all. |
+| **1:00** | BROWSER — the console, **Live** screen | The agent holds no payment credentials. It cannot move money. It can only ask. |
+| **1:15** | CARD 07 — what we refuse to claim | Prompt injection is not solved here. That was never the goal. Prompt hardening is a probabilistic defence against an adversary who gets unlimited attempts. It helps, and then it fails. We don't make the model impossible to persuade — we make persuasion insufficient. Anyone who tells you otherwise is selling something else. |
+| **1:40** | CARD 08 — the repricing diagram | This one is different. No injected text. The merchant simply changes the price after the agent reads it, and before it pays. |
+| **1:52** | TERMINAL — `python make.py toctou` | A better model cannot avoid this. We tested it. |
+| **2:00** | CARD 09 — 3/3, 2/3, 0/3 | Three frontier models. All three paid the repriced amount. Two of them went back and checked the price again — after calling create order. They noticed. The card was already charged. One then tried to issue a refund it had no authority for. |
+| **2:15** | CARD 10 — the line | Diligence after an irreversible action is a post-mortem. The only check that helps is the one that happens before the money moves. |
+| **2:25** | TERMINAL — type it live | The gate decides in code. Here is every import it has. Hashlib, json, time — and this project's own modules. No model. No network. That is a claim you check by reading one screen, and the same set is asserted by a test, so CI fails the moment it stops being true. |
+| **2:50** | SCREEN — Razorpay dashboard, the real payment | This is a real Razorpay test-mode payment. One order, one capture, one partial refund, all through the checkpoint. Same mandate id on all three. That is Razorpay's record, not ours — you can verify the whole chain without trusting a line of our code. |
+| **3:30** | CARD 13 — the results table | The full corpus, undefended. Three labs, three continents. All three breached. Three lakh thirty thousand of order value the shopper never authorised. With the checkpoint in the path: zero. |
+| **3:50** | TERMINAL — `python make.py chaos` | And this attack has no attacker. Duplicate webhooks, reordered delivery, a response lost after the money moved. A naive handler is out three thousand nine hundred and ninety-four rupees. The same gate that contains a hostile agent contains a redelivery, for the same reason. |
+| **4:05** | CARD 15 — latency | The mandate checks cost six microseconds. The whole enforced path — gate, audit write, ledger — is under a millisecond. Against a hundred-and-twenty-millisecond call to a payments API, that is about one percent. A defence nobody will deploy is not a defence. **Say p50 figures, never p99.** The median reproduces to within a few percent; the tail ranged 1.5 ms to over 3 ms on one machine depending on load. The first draft of this script had you saying "one point four seven milliseconds" over a screen that would have shown three — which is the exact class of mistake this project spent a week removing from its own documentation. |
+| **4:15** | SCREEN — `docs/WHAT_BROKE.md`, scrolling | Everything that broke is written down. One signed ₹1,999 mandate once moved ₹5,997. Our own benchmark counted rate-limit errors as successful defences. We published a negative result from a sample of one model, then spent real money proving ourselves wrong. Including the bugs our own fixes introduced. |
+| **4:45** | CARD 17 — close | Razorpay built the interface for agents to operate payments, and could not safely expose the part that pays. We built the boundary that lets you switch it back on. |
+
+---
 ## Before you record
 
 Run these once so nothing is cold on camera. A first-run `mypy` takes a minute and prints
