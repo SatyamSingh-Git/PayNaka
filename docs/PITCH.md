@@ -171,11 +171,23 @@ not only a CLI — but if the console gives you any trouble on the day, cut stra
 ### 2:25 · TERMINAL — type it live
 
 ```bash
-grep -c "openai\|anthropic" paynaka/gate.py
+python make.py no-model
 ```
 
-> The gate decides in code. There is no model in it. That is a claim you check by reading
-> one import block, and CI fails the moment it stops being true.
+*[**Not `grep`.** `grep` does not exist in PowerShell — `The term 'grep' is not recognized`
+— and this is the one beat you type live on camera. This task also shows more than a count:
+it prints gate.py's **entire** import block, so a judge sees `hashlib`, `json`, `time` and
+project modules, and nothing else. It parses the module rather than searching its text,
+which is the stronger claim: a text search counts the word in a comment and misses
+`import openai as o`.]*
+
+> The gate decides in code. Here is every import it has. Hashlib, json, time — and this
+> project's own modules.
+
+*[beat]*
+
+> No model. No network. That is a claim you check by reading one screen, and the same set is
+> asserted by a test, so CI fails the moment it stops being true.
 
 ### 2:50 · SCREEN — Razorpay dashboard, the real payment
 

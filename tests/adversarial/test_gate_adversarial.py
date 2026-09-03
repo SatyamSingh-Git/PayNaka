@@ -624,35 +624,44 @@ class TestNoModelInTheDecisionPath:
     """The architectural claim, enforced as a test rather than asserted in a README."""
 
     def test_gate_module_imports_no_llm_sdk(self) -> None:
-        import ast
-        import pathlib
+        """The set and the parse both come from `scripts.no_model`, which is what
+        `python make.py no-model` prints on camera. Two copies of this list is two answers
+        to "does the gate use a model", and the one a reviewer sees is whichever they
+        happened to run."""
+        from scripts.no_model import FORBIDDEN, GATE, imports_of
 
-        source = pathlib.Path("paynaka/gate.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-        imported: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported.update(alias.name.split(".")[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module.split(".")[0])
-
-        forbidden = {
-            "anthropic",
-            "openai",
-            "langchain",
-            "langgraph",
-            "llama_index",
-            "transformers",
-            "litellm",
-            "mcp",
-            "requests",
-            "httpx",
-        }
-        assert not (imported & forbidden), (
-            f"paynaka/gate.py imports {sorted(imported & forbidden)}. The gate must decide "
-            "with deterministic code and must not reach the network or a model."
+        offenders = sorted(imports_of(GATE) & FORBIDDEN)
+        assert not offenders, (
+            f"paynaka/gate.py imports {offenders}. The gate must decide with deterministic "
+            "code and must not reach the network or a model."
         )
+
+    def test_the_forbidden_set_still_names_the_obvious_ones(self) -> None:
+        """A guard whose list quietly shrank would pass forever. The three SDKs this
+        project actually uses elsewhere must always be on it."""
+        from scripts.no_model import FORBIDDEN
+
+        assert {"openai", "anthropic", "mcp"} <= FORBIDDEN
+
+    def test_it_reports_an_offender_rather_than_only_passing(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        """The other direction: a checker that cannot fail is not a checker."""
+        from scripts.no_model import FORBIDDEN, imports_of
+
+        planted = tmp_path / "planted.py"
+        planted.write_text("import openai as o\nimport json\n", encoding="utf-8")
+        assert imports_of(planted) & FORBIDDEN == {"openai"}
+
+    def test_a_mention_in_a_comment_is_not_an_import(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        """Why this parses rather than greps. `grep -c openai` counts this file as a hit;
+        the module imports nothing of the sort."""
+        from scripts.no_model import FORBIDDEN, imports_of
+
+        prose = tmp_path / "prose.py"
+        prose.write_text(
+            '"""We deliberately do not use openai here."""\nimport json\n',
+            encoding="utf-8",
+        )
+        assert not (imports_of(prose) & FORBIDDEN)
 
     def test_gate_makes_no_network_calls(self, legit_order, mandate, state, policy, clock) -> None:
         """Belt and braces: fail loudly if a socket is ever opened during a decision."""

@@ -121,6 +121,10 @@ replay-breaches: ## every request that escaped a mandate, put back through the g
 modelfree: ## the four defences over the attacks that land. no model, no keys.
 	$(PY) python -m haat.modelfree
 
+.PHONY: no-model
+no-model: ## the gate's imports, in full. the claim you can check in one screen.
+	$(PY) python -m scripts.no_model
+
 .PHONY: latency
 latency: ## what the checkpoint costs. no model, no keys, no network.
 	$(PY) python -m haat.latency
